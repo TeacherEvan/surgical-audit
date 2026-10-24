@@ -9,6 +9,8 @@ Use at the end of **Pass 4.5**, once the fixes pass their probes and the user as
 - **Fix before the assertion that depends on it.** If a new test asserts behaviour that lands in a different commit, the earlier commit is red. That breaks `git bisect`, and any reviewer or CI job that checks out that SHA sees a failure with no context. Order the mechanism first, or land both in one commit.
 - **One concern per commit.** Conventional-commit scopes make the history legible; a mixed commit cannot be reverted selectively when one half turns out to be wrong.
 - **Run the repository's documented gate order verbatim** on the final tree — whatever its `AGENTS.md`/CI defines, in that order. Do not substitute a shorter personal gate, and do not skip the typecheck/e2e step because "only JS changed".
+- **Check installability before reading code.** Run the lockfile install first (`npm ci` / `uv sync --frozen` / `cargo fetch`). If it fails, no gate can run at all, so "the tests pass" is unknowable and every later observation is unverified. An `ERESOLVE`-style peer conflict is a P0 in its own right, not a footnote.
+- **Multiple independent red gates justify one atomic commit.** When install, lint, typecheck, tests and build each fail for unrelated reasons, no ordering makes an intermediate commit green. Land them together and name the reason in the body; several red commits poison `git bisect` worse than one honest atomic fix.
 - **Never rewrite pushed history** to split a commit after the fact. Split before push, or accept one atomic commit and say so in the report.
 
 ---
@@ -26,6 +28,29 @@ Two concerns often share a file (a rendering fix and a data-contract change in t
 7. Confirm `git status --short` is empty and `git log --oneline` reads as one concern per line.
 
 A broken split is worse than a larger commit. When you keep things atomic, name the reason in the commit body.
+
+---
+
+## 2b. Prove each commit green on its **own** tree
+
+Running the gates at the tip only proves the tip. Verify every commit in the series independently — no checkout, no stashing, no writes to the repo:
+
+```bash
+REPO=$(git rev-parse --show-toplevel); WORK=$(mktemp -d)
+for SHA in $(git log --format=%H -5); do
+  SHORT=$(git log -1 --format=%h "$SHA"); DIR="$WORK/$SHORT"
+  mkdir -p "$DIR"; git archive "$SHA" | tar -x -C "$DIR"
+  ln -s "$REPO/node_modules" "$DIR/node_modules"   # reuse deps, don't reinstall
+  rm -rf "$REPO/node_modules/.tmp"                  # defeat incremental-build cache
+  ( cd "$DIR" && npx tsc -b >/dev/null 2>&1; echo "$SHORT tsc=$?"
+                 npx vitest run --reporter=dot 2>&1 | grep -E 'Test Files|Tests ' )
+  rm -f "$DIR/node_modules"
+done
+```
+
+Delete the incremental build-info directory before each run, or `tsc -b` reuses the previous tree's cache and reports a false green. Symlinking `node_modules` keeps this cheap; never delete or replace the repo's real one.
+
+Report the per-commit table (`sha · tsc · test counts`) in the close-out. "Green at the tip" and "green on every commit" are different claims, and only the second one survives a bisect.
 
 ---
 
