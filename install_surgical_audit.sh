@@ -38,10 +38,12 @@ ASSETS=(
     "SKILL.md"
     "scripts/preflight_telemetry.py"
     "scripts/canvas_geometry_probe.mjs"
+    "scripts/dead_export_sweep.py"
     "references/stack_failure_matrices.md"
     "references/test_mutation_rubric.md"
     "references/runtime-probe-harness.md"
     "references/remediation-delivery.md"
+    "references/engagement-and-game-feel-audit.md"
 )
 
 # Resolve the source directory.

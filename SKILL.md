@@ -1,7 +1,7 @@
 ---
 name: surgical-audit
 description: "Use when auditing code read-only across 10 lenses, in MD."
-version: 2.2.0
+version: 2.3.0
 author: "TeacherEvan, Hermes Agent"
 license: MIT
 platforms: [linux, macos, windows]
@@ -12,13 +12,13 @@ metadata:
     requires_tools: [read_file, search_files, terminal, skill_view]
     related_skills: [surgical-investigation, surgical-implementation, surgical-pruning, surgical-hermesdothealth]
 ---
-# Surgical Audit (v2.2 — Principal-10 Polyglot Multi-Pass Architecture)
+# Surgical Audit (v2.3 — Principal-10 Polyglot Multi-Pass Architecture)
 
 Execute a deterministic, zero-mutation architectural and code audit equivalent to a 10-Principal-Engineer review board across any programming language, game engine, or application stack. This skill prevents LLM middle-context attention collapse by combining static AST/polyglot telemetry scanning, stack-specific failure matrices, symbolic mental mutation testing, context-compaction batching, and quantitative health scoring into a single read-only Markdown deliverable.
 
 ## When to Use
 
-Trigger this skill when the user asks for a code audit, architecture review, pre-refactor risk assessment, or test-suite quality judgement — and especially when the complaint is visual or behavioural ("lines across the screen", "no bright colours", "it stutters") and a static read cannot prove the fix. Do not use it for a single bug fix with an obvious cause; it is a full review board and its output is a report, not a patch.
+Trigger this skill when the user asks for a code audit, architecture review, pre-refactor risk assessment, or test-suite quality judgement — and especially when the complaint is visual or behavioural ("lines across the screen", "no bright colours", "it stutters") and a static read cannot prove the fix. Also trigger it when the question is about **engagement, excitement, juice, retention, or "what popular practice am I neglecting"** in a game or consumer-facing interactive: the 10 lenses audit correctness and will score such a product well while it is still joyless. Load `references/engagement-and-game-feel-audit.md` for that family. Do not use it for a single bug fix with an obvious cause; it is a full review board and its output is a report, not a patch.
 
 ## Auxiliary Skill Resources (Progressive Disclosure)
 
@@ -29,7 +29,9 @@ Before executing Pass 1–3, load the bundled reference files using `skill_view(
 - `references/test_mutation_rubric.md`: Protocol for Mental Mutation Testing ($M_{\text{kill}}$ estimation), identifying the 6 vibe-coded test pathologies, the regression-test acceptance gate, and designing a Minimal Viable Test Harness (MVTH).
 - `references/runtime-probe-harness.md`: Pass 2.5 recipe for auditing what the app actually draws — scoping the preflight scan so it does not time out, pristine-baseline A/B on two ports, Canvas 2D geometry hooks, pixel hue histograms for colour complaints, and the probe traps that cost time.
 - `scripts/canvas_geometry_probe.mjs`: Re-runnable Playwright probe that hooks `moveTo`/`lineTo`/`strokeRect` per canvas and reports segment count, longest segment, and horizontal/vertical span counts.
-- `references/remediation-delivery.md`: Pass 4.5 delivery recipe — ordering a green commit series (fix before the acceptance test that asserts it), splitting concerns that interleave inside one file, and verifying the deployed artefact instead of the push.
+- `references/remediation-delivery.md`: Pass 4.5 delivery recipe — ordering a green commit series (fix before the acceptance test that asserts it), splitting concerns that interleave inside one file, proving each commit green on its own tree, and resolving what is *actually* deployed (a `200` is not proof).
+- `references/engagement-and-game-feel-audit.md`: The 11th lens — auditing what the player *feels* rather than what the code does. Authored-but-unwired feature detection, the feedback-channel matrix, difficulty-arc arithmetic, progression persistence, and the coverage-table report shape.
+- `scripts/dead_export_sweep.py`: Re-runnable sweep for exported symbols with zero external references, bucketed into dead / test-only / type-only. The mechanical way to find content that type-checks, may have a green suite, and is connected to nothing.
 
 ## Hard Operational Invariants (Zero-Mutation Law)
 
@@ -57,6 +59,7 @@ Do not inspect files randomly. Establish objective structural metrics first:
 2. Map the **State & Data-Flow Topology**:
    - Identify all entry points, global singletons, game/event loops, external I/O boundaries, and persistence layers.
    - Flag **AI Split-Brain State** (duplicate state representations across modules that must be manually synchronized) and **Orphaned/Hallucinated Code** (dead helpers, duplicate utilities across files, unused exports).
+   - Enumerate the orphans mechanically rather than by eye: `python3 <skill>/scripts/dead_export_sweep.py <target_dir> --src <src>`. Confirm each candidate with `grep -rn "<symbol>" tests/ src/ e2e/` before proposing a delete — hand-rolled harnesses re-implement an old contract inline and keep a zero-caller module load-bearing. A symbol referenced **only** by tests is the strongest signal in the sweep: green suite, dead in production.
 
 ### Pass 2: Stack Matrix Loading & The 10-Principal-Engineer Deep Audit
 
@@ -75,6 +78,7 @@ Load `references/stack_failure_matrices.md` and audit the ranked hotspot batches
    - Asymmetric resource lifecycles: `addEventListener` without `removeEventListener`, `setInterval`/`requestAnimationFrame` without cancellation ID cleanup, undisposed WebGL buffers/textures/programs, unclosed WebAudio contexts, or leaked file descriptors/sockets.
 6. **Lens 6 — Security & Trust-Boundary Engineer (AppSec & Sandboxing):**
    - Client-authoritative score/payroll/permission mutations, missing server-side auth verification, path-traversal/symlink sandbox escapes (`startswith` instead of `Path.resolve().is_relative_to()`), command injection (`shell=True`), XSS (`innerHTML`/`dangerouslySetInnerHTML`), and hardcoded secrets.
+   - **A server-computed verdict that is stored but never consumed downstream** — a geofence/accuracy/anomaly flag that no payout, permission, or audit gate reads — is a P0 trust-boundary finding, not a UX nit. The product records the truth and then pays against it anyway; confirm by tracing the field from writer to the money/enforcement path, not by grepping for its name.
 7. **Lens 7 — Reliability, Fault Tolerance & Chaos Engineer (Crash Vectors):**
    - Silent exception swallowing (`except: pass` / empty `catch {}`), non-atomic file writes (writing directly to target file without temp-file + `os.replace`), corrupted `localStorage`/save-state crash loops on `JSON.parse`, and missing network retry/backoff logic.
 8. **Lens 8 — Type Systems, Schema & Contract Engineer (Boundary Integrity):**
@@ -147,12 +151,16 @@ The zero-mutation law governs the audit pass. When the user asks you to fix the 
 1. **Prove the regression test can fail.** Write the new assertion against the *pre-fix* failure mode ("min visible > 0", "max visible ≤ capacity"), not a proxy ("panel is visible"). If the defect is periodic, the sample window must span at least two full cycles — a 6 s sample cannot catch an 8 s cycle. Mood-check: revert the fix in your head; if the test would still pass, it is decoration. When a full cycle is too slow to sample repeatedly inside the test timeout, **compress the cycle instead of widening the timeout**: mutate the runtime config in-page (`visibleMs 400 / fadeMs 100 / hidden 250–500`), wait one old cycle for pre-scheduled timers to drain, then sample at a fraction of the cycle length — that converts a 30 s test into 12–16 observed cycles.
 2. **Extract the geometry/state maths into a pure module** before writing unit tests. A 1,300-line IIFE controller hides placement maths behind a full runtime boot, which is why the invariant was never stated. Pure functions over measured rects turn "looks fine" into executable proofs (cells ≥ box; two different slots can never intersect).
 3. **Never null a cached layout/grid before rebuilding it.** Swap atomically (build → swap, restore the previous value on failure). Timers fire between epochs and will find nothing to measure, silently starving the system.
-4. **Re-run the whole focused suite immediately.** Failures discovered here are usually in the new code, not the old. Find who mutates a suspicious field by installing a property setter that records `new Error().stack` at the write; find failing pure-function inputs by wrapping the module function *after* it exists (poll, then wrap — wrapping at definition time gets clobbered by the module's own assignment).
+4. **Re-run the whole focused suite immediately.** Failures discovered here are usually in the new code, not the old — but read the test helper's defaults before touching the rule: a fixture that synthesises an artificial offset for the very field your rule keys on (`_creationTime = clientTime + 500min`, `serverOffsetMin`) fails every case for the wrong reason. Fix the fixture, not the rule, and only after confirming the helper is not modelling a real contract. Find who mutates a suspicious field by installing a property setter that records `new Error().stack` at the write; find failing pure-function inputs by wrapping the module function *after* it exists (poll, then wrap — wrapping at definition time gets clobbered by the module's own assignment).
 5. **Before editing an existing assertion to match the code, run `git log -S "<value>" -- <path>`.** If a product commit deliberately changed the behaviour, fix the stale test; if not, you are about to paper over a regression.
 6. **Grep the test tree for the symbol before deleting an "unused" export.** Hand-rolled harnesses re-implement the old contract inline (`window.Helpers.populateInitialSymbols(...)`), so a module with zero production callers can still be load-bearing for a shard you did not run. `grep -rn "<symbol>" tests/ src/tools/` first, then replace the harness with an inline equivalent of the same contract before removing the module.
 
 7. **Land the fix as a green commit series — the fix before the assertion that depends on it.** One concern per commit, and confirm every commit is green on its own tree. A commit whose own suite fails poisons `git bisect` and every reviewer or CI job that checks out that SHA. When a new assertion lives in a test file that also gates behaviour landing in a later commit, order the fix first (or land both together) — never stage the acceptance test ahead of the mechanism it asserts. `references/remediation-delivery.md` carries the recipe for splitting concerns that interleave inside a single file.
-8. **Verify the deployed artefact, not the push.** A successful `git push` and green CI prove the branch merged, not that the fix is live. Fetch the deployed URL for each new file path (expect `200`) and grep the served bundle for a symbol the fix removed (expect `0`) and one it added (expect `> 0`). Report the URLs and counts, not the word "deployed".
+8. **Verify the deployed artefact, not the push — and never accept a `200` as proof.** A successful `git push` proves the branch moved; it does not mean CI ran, and it does not mean the host built. Every host keeps serving the previous successful deployment, so the origin answers `200` whether or not your push ever compiled. Resolve, in this order: (a) **does the automation run at all** — `gh api repos/O/R/actions/permissions` (`enabled:false` means the workflow file is decorative and has never gated anything), `gh run list --workflow=<file>`; a run ending in `startup_failure` at **0s** never started — no runner was allocated (billing/account lock) — so that is "CI never ran", not "CI failed", and every green result in the session is local-only; (b) **what does the platform say is live** — project `live` flag and `latestDeployment.readyState` / `createdAt`, or — with no platform-CLI auth — the host's own Deployment records (`gh api repos/O/R/deployments`, then `/deployments/<id>/statuses`; see `references/remediation-delivery.md` §3c); (c) **hash equality** — the hashed entry-bundle filename served by the site versus the one your own build produced; a different hash is a stale deployment, full stop; (d) only then grep the served bundle for a symbol the fix removed (expect `0`) and one it added (expect `> 0`) — string literals and CSS class names survive minification, renamed local identifiers do not. If the host build failed while your local build passed, reproduce the host runtime from `git archive` before touching code (`references/remediation-delivery.md` §3b). Report hashes and counts, or report the exact gate that blocked delivery — never the word "deployed".
+
+9. **Remediate inside the repo's change budget.** Before designing the fix, establish what regenerating checked-in types requires. Convex's `npx convex codegen` refuses with "No CONVEX_DEPLOYMENT set", so an audited fork with no live deployment cannot absorb a new schema field or index — the tree simply stops typechecking and the fix cannot land. Express the change from fields already stored instead: derive the flag at read time from existing columns (`_creationTime` vs the client timestamp), filter inside the query handler rather than adding an index, and leave the migration to a session that can push. The same rule covers Prisma/Drizzle migrations, protobuf codegen, and any generated client that needs credentials to re-emit.
+
+10. **Turn an ignored verdict into a review gate, not a rejected write.** When the defect is "the server computed the truth and the money path ignored it", do not fix it by rejecting the write: rejection erases the evidence the product needs for disputes and breaks legitimate edge cases (indoor GPS, site-radius drift). Insert the verdict into the state machine that already gates payment — set `needsReview` with a named reason so the shift is excluded until a human resolves it. The record survives, the money is held, and the rule is testable as a pure-function assertion.
 
 Record before/after numbers with the same probe and paste the exact commands you ran. A fix without a failing-first test and a re-measured probe is a claim, not a result.
 
@@ -160,6 +168,7 @@ Record before/after numbers with the same probe and paste the exact commands you
 
 1. Re-verify `tree_integrity_sha256` (or `git status --porcelain`) to confirm zero tracked files were modified.
 2. Output the complete audit using the **Mandatory Markdown Report Template** below.
+3. Write the report into the repository at `docs/audits/<project>-surgical-audit-<YYYY-MM-DD>.md` and commit it as its own docs commit, separate from the fix series — evidence and code must be reviewable and revertable independently.
 
 ---
 
@@ -251,5 +260,6 @@ Record before/after numbers with the same probe and paste the exact commands you
 - **Scope the scanner before you run it.** `preflight_telemetry.py` prunes `.git` only. On a JS repo with `node_modules` it will hash tens of thousands of vendored files and look hung. Copy it to a scratch dir, extend the prune set (`node_modules`, `dist`, `.next`, `__pycache__`, `.venv`), and use the **same** patched copy pre- and post-audit so the digests stay comparable.
 - **`\b` cannot match `:`, `?`, `&&`, `||`.** The branch regex wraps non-word tokens in word boundaries, so ternary and short-circuit branches are invisible in the CC estimate. Treat the reported complexity as a floor, not a measurement.
 - **A health score is not a verdict on the whole repo.** The formula saturates: with no test suite you lose the full 15-point `P_test` regardless of how good the code is, and a docs-only skill with one P1 lands in HIGH. Report the per-defect evidence and let the score rank, not decide.
+- **Build-artefact tests fail before a build, and that is ordering, not a regression.** Tests asserting `public/sw.js`, `dist/*`, or a generated bundle exist will fail on a fresh clone; run the repo's build before scoring them, and never report a pre-build failure as a defect the audit found.
 - **Zero-mutation means zero debris.** `python3 -m py_compile` writes `__pycache__/` into the target. Run probes in a scratch copy, or delete the caches before you re-verify the digest.
 - **A clean `conform.py` does not mean a good skill.** It checks frontmatter shape and reference existence — not whether the procedure is correct, whether the scripts run, or whether the tests would fail if the code were wrong.
