@@ -1,0 +1,38 @@
+name: skill-conform
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  validate:
+    name: Skill authoring conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Dependency-free on purpose: a missing pyyaml must never mask a
+      # conformance failure.
+      - name: Conformance gate (family standard)
+        run: python3 scripts/conform.py
+
+      # The scanner is the skill's only executable asset — prove it runs and
+      # emits a digest before trusting any audit that cites it.
+      - name: Preflight telemetry smoke test
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          printf 'def f(a):\n    if a:\n        return 1\n    return 0\n' > "$tmp/mod.py"
+          python3 scripts/preflight_telemetry.py "$tmp" --out "$tmp/report.json"
+          python3 -c "import json,sys; d=json.load(open('$tmp/report.json')); assert d['tree_integrity_sha256'], 'no digest'; assert d['files_scanned'] >= 1, 'no files'; assert d['effective_loc_total'] > 0, 'no LOC'; print('telemetry OK:', d['tree_integrity_sha256'][:16])"
+
+      - name: Installer is syntactically valid
+        run: bash -n install_surgical_audit.sh
