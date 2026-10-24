@@ -1,6 +1,6 @@
 # surgical-audit
 
-Read-only 10-principal-engineer code, test, and refactor audit skill (v2.1.0)
+Read-only 10-principal-engineer code, test, and refactor audit skill (v2.2.0)
 for Nous Hermes Agent, OpenCode, Antigravity, and Cursor.
 
 ## What it is
@@ -21,22 +21,35 @@ SHA-256 tree-integrity digest captured before and after the audit.
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | Hermes/OpenCode/Cursor skill manifest + 5-pass audit protocol |
+| `SKILL.md` | Skill manifest + 5-pass audit protocol |
 | `scripts/preflight_telemetry.py` | Polyglot static scanner (Python, TS/JS, C#, GDScript, C/C++, GLSL, Rust, Go, Lua) |
+| `scripts/canvas_geometry_probe.mjs` | Playwright probe for rendered-artefact audits (segment counts per canvas) |
 | `references/stack_failure_matrices.md` | Matrix A/B/C domain failure matrices |
 | `references/test_mutation_rubric.md` | Mental mutation testing + MVTH blueprint |
-| `install_surgical_audit.sh` | One-command installer |
+| `references/runtime-probe-harness.md` | Pass 2.5 recipe: serves, probes, hit-tests, colour histograms |
+| `references/remediation-delivery.md` | Pass 4.5 recipe: green commit series, verify the deployed artefact |
+| `install_surgical_audit.sh` | One-command installer (fails if any listed asset is missing) |
 
 ## Install
 
-### Nous Hermes Agent (also OpenCode & Antigravity)
-
-OpenCode's `~/.opencode/skills` is symlinked to `~/.hermes/skills`, and the
-Antigravity skill bundle syncs from `~/.hermes/skills/`, so one install covers
-all three:
+### Nous Hermes Agent
 
 ```bash
 bash install_surgical_audit.sh
+```
+
+### Every other agent (OpenCode, Antigravity, Cursor, Gemini CLI)
+
+Each reads its own tree. `~/.config/opencode/skills` is a symlink to
+`~/.hermes/skills` on many installs, so check before copying:
+
+```bash
+ls -ld ~/.config/opencode/skills
+# symlink -> already covered by the Hermes install
+# real dir -> copy the skill directory into it
+
+cp -r ~/.hermes/skills/surgical-audit ~/.gemini/antigravity-cli/skills/
+cp -r ~/.hermes/skills/surgical-audit ~/.cursor/skills/
 ```
 
 Or one-liner from GitHub:

@@ -26,6 +26,15 @@ Consult the relevant domain matrix below during **Pass 2 (The 10-Principal-Engin
 - **GPU & WebAudio Resource Leaks on Scene/Component Unmount:** Recreating `gl.createTexture()`, `gl.createBuffer()`, `gl.createProgram()`, or `new AudioContext()` on level restart without explicit `.deleteTexture()` / `.close()`, exhausting mobile VRAM or hitting the browser's 6-AudioContext hardware limit.
 - **High-DPI (`devicePixelRatio`) Blur & Input Coordinate Desync:** Setting `<canvas width>` equal to CSS pixels without scaling by `Math.min(window.devicePixelRatio || 1, 2)`, or failing to transform `PointerEvent.clientX/Y` via `getBoundingClientRect()` ratio when the canvas is letterboxed.
 
+### 4. Motion Trails, Retained Geometry & Visual Artefact Classes
+
+- **Retained Polyline History Across Teleports (full-span line artefact):** A motion trail stores the last N positions and strokes them as one polyline. Any teleport — edge wrap (`x < 0 -> width`), pointer drag, viewport resize — leaves a pre-teleport point beside a post-teleport point, so the renderer connects them into a straight line the full width or height of the canvas, in that entity's colour. Many entities make it look like a permanent lattice. Flag every position buffer that survives a coordinate jump without being cleared.
+  - *Required Fix Pattern:* Clear the history on every teleport, AND split the buffer into runs at draw time, dropping any segment longer than a threshold no legitimate per-frame move can reach (e.g. 160 px when max speed is a few px/frame). Belt and braces: the clear handles the known paths, the split handles the ones you missed.
+  - *Detection:* hook `moveTo`/`lineTo` in a real browser and count segments above the threshold; a static read of the draw function cannot distinguish a 1,440 px streak from a 2 px one because both are the same `lineTo` call.
+- **Dual-Source Visual Rules (CSS ban, canvas painter survives):** A visual artefact already "removed" in a stylesheet can still be painted by the canvas/renderer layer — the CSS fix and the canvas fix are separate changes. Grep the renderer for the painter (`drawSubtleGridPattern`, `strokeRect` loops over grid spacing) before declaring the artefact gone, and keep a behavioural test that fails if a full-span stroke returns.
+- **Monochrome Ink Monoculture ("no bright colours"):** A palette with a handful of hue families plus one hard-coded accent used for *every* connector renders as a single-hue haze regardless of entity colour, because the connectors carry more pixel mass than the entities. Audit hue coverage of the rendered output, not the palette array: measure the share of vivid pixels per hue band. A band stuck at 0 % is the defect even when the array lists that colour.
+  - *Required Fix Pattern:* One ink family per hue band, per-sprite connector colour instead of a global accent, and a contract test asserting hue-band coverage + a saturation floor + non-text contrast against the theme backdrop.
+
 ---
 
 ## Matrix B: Reactive Web Apps, Next.js, Svelte, React & Serverless/BaaS (Convex / Supabase / Node)

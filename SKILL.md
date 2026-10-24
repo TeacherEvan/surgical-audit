@@ -1,7 +1,7 @@
 ---
 name: surgical-audit
-description: "Read-only 10-principal-engineer code, test, and refactor audit in MD."
-version: 2.1.0
+description: "Use when auditing code read-only across 10 lenses, in MD."
+version: 2.2.0
 author: "TeacherEvan, Hermes Agent"
 license: MIT
 platforms: [linux, macos, windows]
@@ -10,10 +10,15 @@ metadata:
     category: software-development
     tags: [code-review, surgical-audit, static-analysis, testing, refactoring, read-only]
     requires_tools: [read_file, search_files, terminal, skill_view]
+    related_skills: [surgical-investigation, surgical-implementation, surgical-pruning, surgical-hermesdothealth]
 ---
-# Surgical Audit (v2.1 — Principal-10 Polyglot Multi-Pass Architecture)
+# Surgical Audit (v2.2 — Principal-10 Polyglot Multi-Pass Architecture)
 
 Execute a deterministic, zero-mutation architectural and code audit equivalent to a 10-Principal-Engineer review board across any programming language, game engine, or application stack. This skill prevents LLM middle-context attention collapse by combining static AST/polyglot telemetry scanning, stack-specific failure matrices, symbolic mental mutation testing, context-compaction batching, and quantitative health scoring into a single read-only Markdown deliverable.
+
+## When to Use
+
+Trigger this skill when the user asks for a code audit, architecture review, pre-refactor risk assessment, or test-suite quality judgement — and especially when the complaint is visual or behavioural ("lines across the screen", "no bright colours", "it stutters") and a static read cannot prove the fix. Do not use it for a single bug fix with an obvious cause; it is a full review board and its output is a report, not a patch.
 
 ## Auxiliary Skill Resources (Progressive Disclosure)
 
@@ -21,12 +26,15 @@ Before executing Pass 1–3, load the bundled reference files using `skill_view(
 
 - `scripts/preflight_telemetry.py`: Zero-mutation polyglot static AST & complexity scanner (Python, TS/JS/React/Svelte, C#/Unity, GDScript/Godot, C/C++, GLSL, Rust, Go, Lua). Computes repository SHA-256 Merkle state digests, effective LOC, Cyclomatic Complexity ($CC$), brace nesting depth, God-file flags (`>400` LOC), silent catch blocks, hot-loop allocation markers, and untested module pairings.
 - `references/stack_failure_matrices.md`: Deep domain failure matrices for **Matrix A** (2D/3D Game Engines, WebGL/GLSL, Pygame, Godot, Unity, Canvas), **Matrix B** (Next.js, React, Svelte, Convex, BaaS), and **Matrix C** (Python, C++, CLI, Linux/PRoot, Autonomous Agents).
-- `references/test_mutation_rubric.md`: Protocol for Mental Mutation Testing ($M_{\text{kill}}$ estimation), identifying the 5 vibe-coded test pathologies, and designing a Minimal Viable Test Harness (MVTH).
+- `references/test_mutation_rubric.md`: Protocol for Mental Mutation Testing ($M_{\text{kill}}$ estimation), identifying the 6 vibe-coded test pathologies, the regression-test acceptance gate, and designing a Minimal Viable Test Harness (MVTH).
+- `references/runtime-probe-harness.md`: Pass 2.5 recipe for auditing what the app actually draws — scoping the preflight scan so it does not time out, pristine-baseline A/B on two ports, Canvas 2D geometry hooks, pixel hue histograms for colour complaints, and the probe traps that cost time.
+- `scripts/canvas_geometry_probe.mjs`: Re-runnable Playwright probe that hooks `moveTo`/`lineTo`/`strokeRect` per canvas and reports segment count, longest segment, and horizontal/vertical span counts.
+- `references/remediation-delivery.md`: Pass 4.5 delivery recipe — ordering a green commit series (fix before the acceptance test that asserts it), splitting concerns that interleave inside one file, and verifying the deployed artefact instead of the push.
 
 ## Hard Operational Invariants (Zero-Mutation Law)
 
 1. **Zero Source Mutation:** Never create, edit, format, or delete any repository source, config, or test file. Do not invoke `write_file`, `patch`, or mutating shell commands on target repository files.
-2. **Cryptographic Proof of Non-Mutation:** Capture the repository's pre-audit state hash (`tree_integrity_sha256` from `scripts/preflight_telemetry.py` or `git status --porcelain` + `git rev-parse HEAD`) before Pass 1 and verify identical post-audit state in Pass 5.
+2. **Cryptographic Proof of Non-Mutation:** Capture the repository's pre-audit state hash (`tree_integrity_sha256` from `scripts/preflight_telemetry.py` or `git status --porcelain` + `git rev-parse HEAD`) before Pass 1 and verify identical post-audit state in Pass 5. When the tree is already dirty (prior work in flight) or the fix needs a reproducible before/after, also export a pristine baseline with `git archive HEAD | tar -x -C <scratch>/baseline`, digest it, and serve it on a second port so one identical probe can run against both builds.
 3. **Context-Compaction Batching Rule:** Never ingest more than `5` implementation files or `1,200` LOC in a single inspection turn. For repositories exceeding `1,200` LOC, audit in ranked hotspot batches (Batch 1: Top 5 highest-risk files; Batch 2: Next 5; etc.) and record structured intermediate defect notes before synthesizing the final Markdown report.
 4. **No Generic Linter Filler:** Every reported defect must include:
    - Exact `file_path:L<start>-L<end>` coordinates.
@@ -76,17 +84,38 @@ Load `references/stack_failure_matrices.md` and audit the ranked hotspot batches
 10. **Lens 10 — Cognitive Load & AI-Context Maintainability Engineer (DX):**
     - Deeply nested arrow conditionals (`>3` indentation levels), magic numbers without named constants, inconsistent naming semantics, and overly abstract boilerplate that wastes token context in future AI coding sessions.
 
+### Pass 2.5: Live Geometry Probe (mandatory for layout, obstruction, overlap and rendered-artefact audits)
+
+This pass covers two families: **DOM placement** (entities obstructing each other) and **rendered artefacts** (stray lines, washed-out colour, geometry that only exists after a teleport). For the rendered-artefact family, load `references/runtime-probe-harness.md` and use `scripts/canvas_geometry_probe.mjs`; hook the draw calls and count segments instead of comparing screenshots.
+
+Static reading cannot prove overlap. CSS cascade winners, box-model padding + negative margins, and DOM stacking order routinely make a placement engine place entities inside boxes 3–6× larger than its own constants. For any audit about entities obstructing each other, capture runtime evidence before scoring:
+
+1. Serve the app (`npx http-server -p 8000 -c-1 --cors -s &`) and drive it with the repo's Playwright package, imported by absolute path from a scratch script so no repo file is created (`import { chromium } from "<repo>/node_modules/playwright/index.mjs"`).
+2. Dismiss every input lock / onboarding gate first, then assert the lock is released (`!document.body.classList.contains('<lock-class>')`) — an active input lock makes every entity report as occluded and pollutes the sample.
+3. Measure the **visual** rect with `Range.getBoundingClientRect()` over `element.textContent`, not the element rect: padding + negative margin inflate element rects and overstate overlap.
+4. Hit-test 5 points per entity (`elementFromPoint`): centre + 4 inset corners. Count `fully blocked` (0/5 self), `partially blocked`, and tally blocker tags. This is the browser's own tap-routing algorithm — it is the proof that a tap lands on the wrong entity.
+5. Measure chrome surfaces (`position: fixed/absolute` HUD, keypads, banners) and compute `entityWindow ∩ chrome / entityWindow` to quantify stolen playfield area.
+6. Also measure declared-vs-rendered footprint: `config.symbolWidth/Height` vs `offsetWidth/offsetHeight`. A ratio > 1.5× is a P1 root cause, not a cosmetic issue.
+7. Measure **two** rects per entity and report both: the element rect (what `elementFromPoint` uses = the real tap target) and the text `Range` rect (what the player sees). Padding and negative margins separate them, so an entity can be visually clear but untappable, or tappable but unreadable.
+8. Never sample `document.querySelector('.entity')` — the first match is often a pooled/hidden node with no state attribute, so its rule set differs: a glyph whose state selector adds `display:flex` falls back to `display:block; width:auto` in the pool and measures the whole container width. Pick a live/visible element, and sanity-check any measurement wider than half the container before trusting it.
+9. Opacity `0` does not stop pointer events. Any hidden/pooled entity still intercepts taps unless it also has `pointer-events: none`; count those as blockers in the hit-test tally or you will fix visible overlap and leave invisible theft.
+10. When a media-query rule appears to be ignored, print `getComputedStyle` and the matching rules — an ID selector silently outranks `body.viewport-* .class` overrides, which is how "compaction" rules become dead code that nobody notices.
+
+Record the numbers in the report (viewport × visible count × blocked count). A layout audit without live hit-test numbers is a guess.
+
 ### Pass 3: Existing Test Suite Comparison & Mental Mutation Analysis
 
 Load `references/test_mutation_rubric.md` and audit every test file against the actual implementation AST:
 
 1. Construct the **Implementation vs. Test Matrix** mapping every critical module/function to its corresponding test file.
-2. Check existing tests for the **5 Vibe-Coded Test Pathologies**:
+- Check existing tests for the **6 Vibe-Coded Test Pathologies**:
    - Mock-Mirror Tautologies (testing the mock return value instead of real logic).
    - Weak/Existence-Only Assertions (`toBeDefined()` theater).
    - Happy-Path Tunnel Vision (zero negative/boundary/NaN/error tests).
    - Shared Mutable State across tests.
    - Implementation-Coupled Brittle Spies.
+2b. **Prove the tested module is shipped.** For every unit-tested file, grep the page HTML and the service-worker precache for its path. A module can own a green 270-line unit suite and be loaded by nothing — that is invisible debt masquerading as coverage. Count those tests as zero coverage and recommend delete-or-wire.
+
 3. Run the **4-Mutant Mental Execution Protocol** (`M1: Boundary Flip`, `M2: Zero/Empty Degeneracy`, `M3: Side-Effect Deletion`, `M4: Async Failure Injection`) on core tested functions to compute the **Estimated Mutation Kill Score ($M_{\text{kill}}\%$)**.
 4. For every P0/P1 bug discovered in Pass 2, explicitly answer: *"Why did the existing test suite miss this defect?"*
 5. Design a **Minimal Viable Test Harness (MVTH)** with concrete table-driven test cases for unprotected high-risk modules.
@@ -110,6 +139,22 @@ $$S_{\text{health}} = \max\left(0, \text{round}\left(100 - D_{\text{raw}} \times
 For each major structural flaw, design a **Surgical Refactoring Blueprint**:
 - Show exact **Before (Flawed Pattern)** vs. **After (Target Pattern)** code blocks inside the Markdown report.
 - Respect the **Anti-Over-Abstraction Rule**: favor compact, deterministic patterns (explicit finite-state tables, pure math helpers, fixed-size object pools, schema validators) that minimize token footprint for future AI coding agents.
+
+### Pass 4.5: Remediation Hand-off (only when the user says proceed)
+
+The zero-mutation law governs the audit pass. When the user asks you to fix the findings, the audit becomes an implementation job with its own gate:
+
+1. **Prove the regression test can fail.** Write the new assertion against the *pre-fix* failure mode ("min visible > 0", "max visible ≤ capacity"), not a proxy ("panel is visible"). If the defect is periodic, the sample window must span at least two full cycles — a 6 s sample cannot catch an 8 s cycle. Mood-check: revert the fix in your head; if the test would still pass, it is decoration. When a full cycle is too slow to sample repeatedly inside the test timeout, **compress the cycle instead of widening the timeout**: mutate the runtime config in-page (`visibleMs 400 / fadeMs 100 / hidden 250–500`), wait one old cycle for pre-scheduled timers to drain, then sample at a fraction of the cycle length — that converts a 30 s test into 12–16 observed cycles.
+2. **Extract the geometry/state maths into a pure module** before writing unit tests. A 1,300-line IIFE controller hides placement maths behind a full runtime boot, which is why the invariant was never stated. Pure functions over measured rects turn "looks fine" into executable proofs (cells ≥ box; two different slots can never intersect).
+3. **Never null a cached layout/grid before rebuilding it.** Swap atomically (build → swap, restore the previous value on failure). Timers fire between epochs and will find nothing to measure, silently starving the system.
+4. **Re-run the whole focused suite immediately.** Failures discovered here are usually in the new code, not the old. Find who mutates a suspicious field by installing a property setter that records `new Error().stack` at the write; find failing pure-function inputs by wrapping the module function *after* it exists (poll, then wrap — wrapping at definition time gets clobbered by the module's own assignment).
+5. **Before editing an existing assertion to match the code, run `git log -S "<value>" -- <path>`.** If a product commit deliberately changed the behaviour, fix the stale test; if not, you are about to paper over a regression.
+6. **Grep the test tree for the symbol before deleting an "unused" export.** Hand-rolled harnesses re-implement the old contract inline (`window.Helpers.populateInitialSymbols(...)`), so a module with zero production callers can still be load-bearing for a shard you did not run. `grep -rn "<symbol>" tests/ src/tools/` first, then replace the harness with an inline equivalent of the same contract before removing the module.
+
+7. **Land the fix as a green commit series — the fix before the assertion that depends on it.** One concern per commit, and confirm every commit is green on its own tree. A commit whose own suite fails poisons `git bisect` and every reviewer or CI job that checks out that SHA. When a new assertion lives in a test file that also gates behaviour landing in a later commit, order the fix first (or land both together) — never stage the acceptance test ahead of the mechanism it asserts. `references/remediation-delivery.md` carries the recipe for splitting concerns that interleave inside a single file.
+8. **Verify the deployed artefact, not the push.** A successful `git push` and green CI prove the branch merged, not that the fix is live. Fetch the deployed URL for each new file path (expect `200`) and grep the served bundle for a symbol the fix removed (expect `0`) and one it added (expect `> 0`). Report the URLs and counts, not the word "deployed".
+
+Record before/after numbers with the same probe and paste the exact commands you ran. A fix without a failing-first test and a re-measured probe is a claim, not a result.
 
 ### Pass 5: Report Generation & Zero-Mutation Verification
 
@@ -200,3 +245,11 @@ For each major structural flaw, design a **Surgical Refactoring Blueprint**:
 
 > **Prompt [P0-1] (`path/to/file.ext`):**
 > "Strictly scope edits to `path/to/file.ext` (lines X–Y) and `path/to/file.test.ext`. Do not modify any other files. Replace [flawed mechanism] with [target mechanism] so that [invariant holds]. Add a regression test verifying [boundary/failure condition] and run the test suite to confirm green."
+
+## Pitfalls
+
+- **Scope the scanner before you run it.** `preflight_telemetry.py` prunes `.git` only. On a JS repo with `node_modules` it will hash tens of thousands of vendored files and look hung. Copy it to a scratch dir, extend the prune set (`node_modules`, `dist`, `.next`, `__pycache__`, `.venv`), and use the **same** patched copy pre- and post-audit so the digests stay comparable.
+- **`\b` cannot match `:`, `?`, `&&`, `||`.** The branch regex wraps non-word tokens in word boundaries, so ternary and short-circuit branches are invisible in the CC estimate. Treat the reported complexity as a floor, not a measurement.
+- **A health score is not a verdict on the whole repo.** The formula saturates: with no test suite you lose the full 15-point `P_test` regardless of how good the code is, and a docs-only skill with one P1 lands in HIGH. Report the per-defect evidence and let the score rank, not decide.
+- **Zero-mutation means zero debris.** `python3 -m py_compile` writes `__pycache__/` into the target. Run probes in a scratch copy, or delete the caches before you re-verify the digest.
+- **A clean `conform.py` does not mean a good skill.** It checks frontmatter shape and reference existence — not whether the procedure is correct, whether the scripts run, or whether the tests would fail if the code were wrong.
