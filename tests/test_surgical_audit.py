@@ -13,8 +13,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
-import jsonschema  # type: ignore[import-untyped]
-import pytest  # type: ignore[import-not-found]
+import jsonschema
+import pytest
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = SKILL_ROOT / "scripts"

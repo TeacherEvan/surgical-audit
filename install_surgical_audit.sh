@@ -94,6 +94,14 @@ chmod +x \
   "${HERMES_SKILL_DIR}/scripts/dead_export_sweep.py" \
   "${HERMES_SKILL_DIR}/scripts/canvas_geometry_probe.mjs"
 
+if [ "${HERMES_SKILL_DIR%/}" = "${HOME}/.hermes/skills/surgical-audit" ] \
+  && [ -x "${SCRIPT_DIR}/scripts/sync-skill.sh" ] \
+  && git -C "${SCRIPT_DIR}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  echo
+  echo "[install_surgical_audit] Syncing all 8 agent skill mirrors..."
+  bash "${SCRIPT_DIR}/scripts/sync-skill.sh" sync
+fi
+
 echo
 echo "[install_surgical_audit] Verification:"
 if command -v python3 >/dev/null 2>&1; then

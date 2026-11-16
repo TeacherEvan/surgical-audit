@@ -117,7 +117,8 @@ Never sample the same build twice in a row and compare means of two. Run the arm
 
 ```python
 for _ in range(3):
-    base.append(sample(BASELINE_URL)); ref.append(sample(REF_URL))
+    base.append(sample(BASELINE_URL))
+    ref.append(sample(REF_URL))
 median = statistics.median
 ```
 
