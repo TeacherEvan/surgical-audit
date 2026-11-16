@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "surgical-audit-preflight",
+          "version": "2.4.0",
+          "informationUri": "https://github.com/TeacherEvan/surgical-audit",
+          "rules": [
+            {
+              "id": "SA-GOD-FILE",
+              "name": "GodFileThresholdExceeded",
+              "shortDescription": {
+                "text": "File exceeds 400 effective lines of code"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SA-HIGH-COMPLEXITY",
+              "name": "HighComplexityHotspot",
+              "shortDescription": {
+                "text": "Function or file exceeds complexity (CC >= 10), nesting (> 5), or span LOC (>= 60)"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "SA-SILENT-CATCH",
+              "name": "SilentExceptionHandler",
+              "shortDescription": {
+                "text": "Empty or pass-only exception catch handler swallows errors"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "SA-HOT-LOOP",
+              "name": "HotLoopAllocationMarker",
+              "shortDescription": {
+                "text": "Per-frame or hot-loop allocation/callback marker detected"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "SA-PARSE-ERROR",
+              "name": "SyntaxParseError",
+              "shortDescription": {
+                "text": "Syntax error prevented full AST inspection"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "properties": {
+            "tree_integrity_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "skipped_dirs_count": 0,
+            "files_scanned": 1,
+            "effective_loc_total": 42
+          }
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "SA-SILENT-CATCH",
+          "ruleIndex": 2,
+          "level": "error",
+          "message": {
+            "text": "sample/module.py contains 1 silent catch handler(s)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sample/module.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              }
+            }
+          ],
+          "properties": {
+            "silent_catches": 1
+          }
+        }
+      ]
+    }
+  ]
+}

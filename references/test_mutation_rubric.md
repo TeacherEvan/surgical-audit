@@ -4,9 +4,9 @@ Use this rubric during **Pass 3 (Existing Test Suite Comparison & Mental Mutatio
 
 ---
 
-## 1. The 6 Vibe-Coded Test Pathologies
+## 1. The 7 Vibe-Coded Test Pathologies
 
-When AI coding assistants write tests alongside implementation code, they systematically introduce six defects. Audit every test file against these patterns:
+When AI coding assistants write tests alongside implementation code, they systematically introduce seven defects. Audit every test file against these patterns:
 
 1. **The Mock-Mirror Tautology (Testing the Mock, Not the Code):**
    - *Symptom:* The test mocks the database/API/physics module to return `{ status: "ok", score: 100 }`, calls a thin wrapper, and asserts `expect(res.score).toBe(100)`.
@@ -25,6 +25,10 @@ When AI coding assistants write tests alongside implementation code, they system
    - *Symptom:* A periodic defect with an 8 s period is tested with a 5–6 s sample, or a single sample taken after "the system settled". The test passes against the broken build because it never observed the failing phase.
    - *Diagnosis:* Name the period the bug lives on (animation cycle, timer sweep, cache invalidation) and check the sample covers at least two full periods. If not, the test cannot kill the mutant — compress the timing through the runtime config or lengthen the window.
    - *Fix shape:* sample the transition windows explicitly (startup burst, end-of-cycle blank, eviction) and assert the failure mode directly (`min > 0`, `max <= capacity`) instead of a proxy (`element exists`, `panel is visible`).
+7. **Result-Only Assertions (No Resource-Count Proof):**
+   - *Symptom:* The test asserts what a function *returned*, never how many operations it took to get there. A storage read that returns the right rows via two separate transactions instead of one passes every assertion while being race-broken under concurrency.
+   - *Diagnosis:* Where atomicity matters — IndexedDB transactions, database round-trips, HTTP requests, file handles — assert the *count* alongside the value (`assert.equal(txCount, 1)`). A split read can pair a key with the wrong record and then delete the wrong row without ever returning a value that looks wrong. Result-only tests cannot kill that mutant.
+   - *Fix shape:* inject a counting stub (a fake `indexedDB` whose `transaction()` increments a counter and resolves requests in a microtask), then assert the count and the payload together. The stub costs ~30 lines and turns an invisible concurrency bug into a red test.
 
 ---
 
@@ -53,6 +57,7 @@ Line coverage measures which lines *executed*, not which bugs are *caught*. For 
 | **M4 (Async Failure Injection)** | Promise/I/O rejection | Force the awaited dependency to throw/reject | Is there a negative test verifying rollback, retry, or structured error state? |
 
 ### Estimating the Mutation Kill Score ($M_{\text{kill}}$)
+
 Compute the estimated Mutation Kill Score across sampled critical functions:
 $$M_{\text{kill}} = \frac{\text{Total Mutants Killed by Existing Assertions}}{\text{Total Mutants Evaluated}} \times 100\%$$
 

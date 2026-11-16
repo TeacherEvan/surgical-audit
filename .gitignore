@@ -2,5 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+3.11/
 .coverage
+node_modules/
 .DS_Store

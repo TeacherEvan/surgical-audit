@@ -73,23 +73,34 @@ A repo can carry a complete CI pipeline that has never run. That is how a red `m
 ```
 
 ```bash
-# 3. Compare content hashes — the only unambiguous proof
+# 3. Compare content hashes — a necessary signal, never the verdict on its own.
 LOCAL=$(basename "$(ls dist/assets/app-*.js | head -1)")          # from YOUR build
 REMOTE=$(curl -s "$SITE/" | grep -oE 'assets/app-[A-Za-z0-9_-]+\.js' | head -1 | xargs basename)
-[ "$LOCAL" = "$REMOTE" ] && echo "deployed" || echo "STALE: serving $REMOTE, built $LOCAL"
+[ "$LOCAL" = "$REMOTE" ] && echo "hash-match" || echo "hash-mismatch: serving $REMOTE, built $LOCAL"
 ```
 
-Different hash = old deployment, full stop. Report both hashes.
+Equal hashes prove the served artefact is the one you built. **Unequal hashes do not prove staleness, full stop the other way.** A host that resolves its own dependency tree inside its sandbox (Vercel installs from your lockfile in its own builder) emits different chunk hashes for byte-identical source, and content-addressed chunk names can collide with an earlier local build — so one matching `rolldown-runtime-*.js` alongside a differing `app-*.js` is the normal shape of a *fresh* deploy, not a stale one. Treat a mismatch as "keep investigating" and let step 4 decide; reporting it as stale sends you re-deploying a build that was already live.
 
 ```bash
-# 4. a symbol the fix DELETED must be absent (expect 0), one it ADDED present (> 0)
-curl -s "$SITE/assets/app-<hash>.js" | grep -c "removedHelperName"   # 0
-curl -s "$SITE/assets/app-<hash>.js" | grep -c "game-object"        # > 0
+# 4. THE DECISIVE GATE: markers the fix added must be present, removed ones absent.
+for CSS in $(curl -s "$SITE/" | grep -oE 'assets/css/[A-Za-z0-9._-]+\.css'); do
+  curl -s "$SITE/$CSS" -o /tmp/served.css
+  printf '%s  %s\n' "$(grep -c 'menu-action-card' /tmp/served.css)" "$CSS"
+done
+curl -s "$SITE/assets/app-<hash>.js" | grep -c "removedHelperName"   # expect 0
 ```
 
-Grep for strings that ship, not identifiers you renamed: CSS class names, literal keys and user-facing copy survive minification; local variable names do not.
+Grep for strings that ship, not identifiers you renamed: CSS class names, literal keys and user-facing copy survive minification; local variable names do not, and a minifier rewrites `::before` to `:before`, so search both forms or the marker reads as absent. Fetch stylesheets from the `href`s in the served HTML rather than guessing a filename, and check *each* one — a Vite build splits CSS across `css/app-*.css` and `css/index-*.css` and the marker usually lives in only one.
 
 Report the URLs, the two hashes and the counts. "Deployed" is a claim; `app-ABC123 == app-ABC123 / 0 / 3` is evidence.
+
+### When it is green locally and red on the host, suspect a host-only ignore file
+
+`.vercelignore`, `.dockerignore`, `.gcloudignore`, `.npmignore`, `.slugignore` are applied **only** inside the builder sandbox, so they cannot fail locally no matter how often the build is run. The classic trap is a directory rule (`scripts/`, `tools/`) that deletes a helper the build command itself executes.
+
+Simulate the sandbox instead of guessing: `git archive HEAD | tar -x -C $SCRATCH`, delete exactly what the ignore file excludes, then run the REAL build command. Expect the platform's own error text. Fix with `scripts/*` plus `!scripts/<needed>.cjs` — never `scripts/`, because a `!` negation cannot rescue a file inside a directory that was itself excluded. Re-run for exit 0 before pushing.
+
+Add a permanent guard test: walk the build script transitively, collect every file path it executes, and assert the ignore file removes none of them. It is the only test that can catch this class, since the bug does not exist outside the sandbox.
 
 ---
 
@@ -146,6 +157,7 @@ Pushes to some hosts echo pre-existing security advisories (Dependabot and frien
 - Name the dependency chain (which direct dependency pulls it in) and whether it ships in the production artefact — dev-only tooling is a different risk class from a runtime dependency.
 - Check whether an update branch already exists before proposing work.
 - Offer it as its own PR. Never fold a lockfile bump into a visual or behavioural fix; it makes both harder to review and to revert.
+- **`npm config set --location=project` writes into the repository.** It edits the tracked `.npmrc`, and a following `npm audit fix` rewrites that file again — collapsing its comments and reordering keys — so a timeout bump you made for one slow fetch lands in the diff as an unrelated config change. Use `--location=user` or an `NPM_CONFIG_*` env var for a one-off, and run `git checkout -- .npmrc` before staging: the only intended diff from a dependency pass is the lockfile. Verify with `git status --porcelain` that `.npmrc` is untouched.
 
 ---
 

@@ -1,38 +1,45 @@
-name: skill-conform
+---
+name: Skill CI
 
-on:
+"on":
   push:
-    branches: [main, master]
+    branches:
+      - main
   pull_request:
-    branches: [main, master]
 
 jobs:
   validate:
-    name: Skill authoring conformance
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-
-      # Dependency-free on purpose: a missing pyyaml must never mask a
-      # conformance failure.
-      - name: Conformance gate (family standard)
-        run: python3 scripts/conform.py
-
-      # The scanner is the skill's only executable asset — prove it runs and
-      # emits a digest before trusting any audit that cites it.
-      - name: Preflight telemetry smoke test
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install lint and test dependencies
         run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          printf 'def f(a):\n    if a:\n        return 1\n    return 0\n' > "$tmp/mod.py"
-          python3 scripts/preflight_telemetry.py "$tmp" --out "$tmp/report.json"
-          python3 -c "import json,sys; d=json.load(open('$tmp/report.json')); assert d['tree_integrity_sha256'], 'no digest'; assert d['files_scanned'] >= 1, 'no files'; assert d['effective_loc_total'] > 0, 'no LOC'; print('telemetry OK:', d['tree_integrity_sha256'][:16])"
-
-      - name: Installer is syntactically valid
-        run: bash -n install_surgical_audit.sh
+          python -m pip install --upgrade pip
+          pip install \
+            pytest ruff mypy pyyaml jsonschema check-jsonschema yamllint
+          sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Conformance gate
+        run: python3 -B scripts/conform.py
+      - name: Lint and typecheck Python
+        run: |
+          ruff check --no-cache scripts/ tests/
+          ruff check --no-cache --select E,W,F,I,B,UP,SIM,C901,EXE \
+            scripts/ tests/
+          ruff format --check --no-cache scripts/ tests/
+          mypy --strict --cache-dir /tmp/mypy_cache_sa scripts/ tests/
+      - name: Run unit tests
+        run: pytest -o cache_dir=/tmp/pytest_cache_sa -v tests/
+      - name: Lint shell scripts and CI workflow
+        run: |
+          shellcheck -x install_surgical_audit.sh scripts/sync-skill.sh
+          yamllint --strict .github/workflows/skill-ci.yml
+      - name: Check JS probe syntax
+        run: node --check scripts/canvas_geometry_probe.mjs
+      - name: Validate Draft 2020-12 JSON Schemas
+        run: check-jsonschema --check-metaschema schemas/*.schema.json

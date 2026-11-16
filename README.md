@@ -1,85 +1,62 @@
-# surgical-audit
+# Surgical Audit (`v2.4.0`)
 
-Read-only 10-principal-engineer code, test, and refactor audit skill (v2.2.0)
-for Nous Hermes Agent, OpenCode, Antigravity, and Cursor.
+**Deterministic, zero-mutation 10-Principal-Engineer code, visual-runtime, and document audit protocol across any stack.**
 
-## What it is
+Combines AST/polyglot preflight telemetry (`preflight_telemetry.py`), dead-export sweeps (`dead_export_sweep.py`), Playwright Canvas 2D probes (`canvas_geometry_probe.mjs`), stack failure matrices, mental mutation testing ($M_{\text{kill}}$), quantitative health scoring, OASIS SARIF `2.1.0` reports, and Draft `2020-12` JSON Schemas.
 
-`surgical-audit` is a zero-mutation, deterministic architectural and code audit
-equivalent to a 10-Principal-Engineer review board. It combines:
+## Architecture Overview
 
-- Polyglot static AST / complexity scanning (`scripts/preflight_telemetry.py`)
-- Stack-specific failure matrices (`references/stack_failure_matrices.md`)
-- Mental mutation testing rubric (`references/test_mutation_rubric.md`)
-- Context-compaction batching & quantitative health scoring
-- A mandatory Markdown report template
+| Component | Purpose |
+| :--- | :--- |
+| [`SKILL.md`](SKILL.md) | Entrypoint manifest, Pass 1–5 protocol, Pass 2.5 runtime probing, Pass 4.5 delivery gates |
+| [`AGENTS.md`](AGENTS.md) | Repo conventions, non-negotiable zero-PII/zero-mutation rules, and gate order |
+| [`LICENSE`](LICENSE) | MIT License |
+| [`scripts/preflight_telemetry.py`](scripts/preflight_telemetry.py) | Read-only scanner computing `tree_integrity_sha256`, pruned dir count, per-function Python AST CC & control-flow nesting, docstring-excluded LOC, JS/TS short-circuit/ternary CC, and `--sarif` 2.1.0 |
+| [`scripts/dead_export_sweep.py`](scripts/dead_export_sweep.py) | Zero-caller & test-only export detector (`async function`, `function*`, destructured/named exports, `--src`, `--json`) |
+| [`scripts/canvas_geometry_probe.mjs`](scripts/canvas_geometry_probe.mjs) | Playwright `CanvasRenderingContext2D` hook (`WeakMap` per context, `getTransform()`, curves, hue bands, `try/finally` close) |
+| [`scripts/conform.py`](scripts/conform.py) | Family metadata, reference, and canonical-digest conformance gate |
+| [`scripts/sync-skill.sh`](scripts/sync-skill.sh) | Byte-verified 8-target local mirror sync (`check`, `sync`, `verify`, `list`) |
+| [`references/stack_failure_matrices.md`](references/stack_failure_matrices.md) | Matrices A–D (Game/WebGL, React/Next/Convex, Python/C++/CLI/Agents, Supply-Chain/CVE/SBOM/`ast-grep`) |
+| [`references/test_mutation_rubric.md`](references/test_mutation_rubric.md) | 7 Vibe-Coded Test Pathologies, regression gate, $M_{\text{kill}}$, MVTH pyramid |
+| [`references/runtime-probe-harness.md`](references/runtime-probe-harness.md) | Pristine baselines, Canvas probes, WCAG 2.2 checks, host-load benchmarking (§8) |
+| [`references/remediation-delivery.md`](references/remediation-delivery.md) | Green commit series, deployed artefact verification, ignore-file sandboxes, server-first releases |
+| [`references/engagement-and-game-feel-audit.md`](references/engagement-and-game-feel-audit.md) | 11th lens: player feel, unwired systems, accessibility queries, coverage tables |
+| [`references/document-audit.md`](references/document-audit.md) | Multi-file CV/document consistency & PDF/ATS verification guide (zero PII) |
+| [`templates/`](templates/) | Markdown (`report.md`) and OASIS SARIF `2.1.0` (`report.sarif`) deliverables |
+| [`schemas/`](schemas/) | Draft `2020-12` JSON Schemas (`unevaluatedProperties: false`) for all 3 tool outputs |
+| [`docs/adr/0001-polyglot-telemetry-and-batching.md`](docs/adr/0001-polyglot-telemetry-and-batching.md) | Architecture Decision Record superseding legacy v2.1 scratch notes |
 
-It never mutates the target repository and proves non-mutation with a
-SHA-256 tree-integrity digest captured before and after the audit.
+## Installation & Syncing Mirrors
 
-## Files
-
-| File | Purpose |
-|------|---------|
-| `SKILL.md` | Skill manifest + 5-pass audit protocol |
-| `scripts/preflight_telemetry.py` | Polyglot static scanner (Python, TS/JS, C#, GDScript, C/C++, GLSL, Rust, Go, Lua) |
-| `scripts/canvas_geometry_probe.mjs` | Playwright probe for rendered-artefact audits (segment counts per canvas) |
-| `references/stack_failure_matrices.md` | Matrix A/B/C domain failure matrices |
-| `references/test_mutation_rubric.md` | Mental mutation testing + MVTH blueprint |
-| `references/runtime-probe-harness.md` | Pass 2.5 recipe: serves, probes, hit-tests, colour histograms |
-| `references/remediation-delivery.md` | Pass 4.5 recipe: green commit series, verify the deployed artefact |
-| `install_surgical_audit.sh` | One-command installer (fails if any listed asset is missing) |
-
-## Install
-
-### Nous Hermes Agent
+From the root of this repository:
 
 ```bash
-bash install_surgical_audit.sh
+# Sync runtime assets to all 8 local agent skill targets and byte-verify
+bash scripts/sync-skill.sh sync
+bash scripts/sync-skill.sh verify
 ```
 
-### Every other agent (OpenCode, Antigravity, Cursor, Gemini CLI)
+Or install into a standalone Hermes skill directory with `./install_surgical_audit.sh [target_dir]`.
 
-Each reads its own tree. `~/.config/opencode/skills` is a symlink to
-`~/.hermes/skills` on many installs, so check before copying:
+## Usage Examples
 
 ```bash
-ls -ld ~/.config/opencode/skills
-# symlink -> already covered by the Hermes install
-# real dir -> copy the skill directory into it
+# 1. Deterministic preflight telemetry (JSON or OASIS SARIF 2.1.0)
+python3 -B scripts/preflight_telemetry.py /path/to/repo --out /tmp/telemetry.json
+python3 -B scripts/preflight_telemetry.py /path/to/repo --sarif --out /tmp/telemetry.sarif
 
-cp -r ~/.hermes/skills/surgical-audit ~/.gemini/antigravity-cli/skills/
-cp -r ~/.hermes/skills/surgical-audit ~/.cursor/skills/
+# 2. Dead & test-only export sweep (scanning whole repo while scoping exports to src/)
+python3 -B scripts/dead_export_sweep.py /path/to/repo --src src --json
+
+# 3. Canvas geometry & hue probe (requires Playwright in NODE_PATH or PLAYWRIGHT_MODULE)
+node scripts/canvas_geometry_probe.mjs http://127.0.0.1:8000 300 "#game-canvas"
+
+# 4. Run conformance & unit tests cleanly
+python3 -B scripts/conform.py
+pytest -o cache_dir=/tmp/pytest_cache_sa -v tests/
 ```
 
-Or one-liner from GitHub:
+## Non-Negotiable Invariants
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/TeacherEvan/surgical-audit/main/install_surgical_audit.sh | bash
-```
-
-### Cursor
-
-Copy the skill into Cursor's skills directory:
-
-```bash
-mkdir -p ~/.cursor/skills/surgical-audit
-cp SKILL.md references/stack_failure_matrices.md references/test_mutation_rubric.md scripts/preflight_telemetry.py ~/.cursor/skills/surgical-audit/
-chmod +x ~/.cursor/skills/surgical-audit/scripts/preflight_telemetry.py
-```
-
-## Usage
-
-Invoke the skill in Nous Hermes Agent (`/surgical-audit` or natural language),
-then run the preflight scanner against a target repo:
-
-```bash
-python3 ~/.hermes/skills/surgical-audit/scripts/preflight_telemetry.py /path/to/target
-```
-
-See `SKILL.md` for the full Pass 1–5 protocol and the mandatory Markdown report
-template.
-
-## License
-
-MIT
+- **Zero Mutation:** Probes never write into audited repositories. Invoke Python scripts with `python3 -B` and store output artifacts in `/tmp`.
+- **Zero PII:** All examples, tests, schemas, and documentation use synthetic placeholders (`<user>@example.com`).

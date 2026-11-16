@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TeacherEvan/surgical-audit/schemas/telemetry.schema.json",
+  "title": "Surgical Audit Preflight Telemetry Report",
+  "type": "object",
+  "required": [
+    "target_dir",
+    "tree_integrity_sha256",
+    "skipped_dirs_count",
+    "files_scanned",
+    "effective_loc_total",
+    "risk_formula",
+    "god_files",
+    "high_complexity_files",
+    "files"
+  ],
+  "properties": {
+    "target_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tree_integrity_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "skipped_dirs_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "files_scanned": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "effective_loc_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "risk_formula": {
+      "type": "string",
+      "minLength": 1
+    },
+    "god_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "high_complexity_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fileTelemetry"
+      }
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "pythonFunctionSpan": {
+      "type": "object",
+      "required": ["name", "start_line", "end_line", "loc", "estimated_cc"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "loc": { "type": "integer", "minimum": 1 },
+        "estimated_cc": { "type": "integer", "minimum": 1 }
+      },
+      "unevaluatedProperties": false
+    },
+    "polyglotFunctionSpan": {
+      "type": "object",
+      "required": ["name", "start_line", "end_line", "loc", "estimated_cc_window"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "loc": { "type": "integer", "minimum": 1 },
+        "estimated_cc_window": { "type": "integer", "minimum": 1 }
+      },
+      "unevaluatedProperties": false
+    },
+    "fileTelemetry": {
+      "type": "object",
+      "required": [
+        "path",
+        "ext",
+        "effective_loc",
+        "cyclomatic_complexity",
+        "nesting_depth",
+        "max_function_loc",
+        "silent_catches",
+        "hot_loop_markers",
+        "branch_density",
+        "risk_score",
+        "high_complexity_functions",
+        "parse_error",
+        "god_file",
+        "high_complexity"
+      ],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "ext": { "type": "string", "pattern": "^\\.[a-z0-9]+$" },
+        "effective_loc": { "type": "integer", "minimum": 0 },
+        "cyclomatic_complexity": { "type": "integer", "minimum": 1 },
+        "nesting_depth": { "type": "integer", "minimum": 0 },
+        "max_function_loc": { "type": "integer", "minimum": 0 },
+        "silent_catches": { "type": "integer", "minimum": 0 },
+        "hot_loop_markers": { "type": "integer", "minimum": 0 },
+        "branch_density": { "type": "number", "minimum": 0 },
+        "risk_score": { "type": "number", "minimum": 0 },
+        "high_complexity_functions": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/pythonFunctionSpan" },
+              { "$ref": "#/$defs/polyglotFunctionSpan" }
+            ]
+          }
+        },
+        "parse_error": { "type": ["string", "null"] },
+        "god_file": { "type": "boolean" },
+        "high_complexity": { "type": "boolean" }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

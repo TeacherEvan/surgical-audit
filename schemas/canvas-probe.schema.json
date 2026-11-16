@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TeacherEvan/surgical-audit/schemas/canvas-probe.schema.json",
+  "title": "Surgical Audit Canvas Geometry Probe Output",
+  "type": "object",
+  "required": [
+    "url",
+    "threshold",
+    "pageErrors",
+    "consoleErrors",
+    "requestFailures",
+    "geometry",
+    "hues"
+  ],
+  "properties": {
+    "url": {
+      "type": "string",
+      "minLength": 1
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0
+    },
+    "pageErrors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "consoleErrors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "requestFailures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/requestFailure"
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/canvasGeometry"
+      }
+    },
+    "hues": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/hueError" },
+        { "$ref": "#/$defs/hueHistogram" }
+      ]
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "requestFailure": {
+      "type": "object",
+      "required": ["url", "errorText"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "errorText": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "canvasGeometry": {
+      "type": "object",
+      "required": [
+        "segments",
+        "longCount",
+        "longest",
+        "horizontal",
+        "vertical",
+        "rectEdges",
+        "sample"
+      ],
+      "properties": {
+        "segments": { "type": "integer", "minimum": 0 },
+        "longCount": { "type": "integer", "minimum": 0 },
+        "longest": { "type": "number", "minimum": 0 },
+        "horizontal": { "type": "integer", "minimum": 0 },
+        "vertical": { "type": "integer", "minimum": 0 },
+        "rectEdges": { "type": "integer", "minimum": 0 },
+        "sample": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "hueError": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string", "minLength": 1 }
+      },
+      "unevaluatedProperties": false
+    },
+    "hueHistogram": {
+      "type": "object",
+      "required": ["vivid", "hueBands"],
+      "properties": {
+        "vivid": { "type": "integer", "minimum": 0 },
+        "hueBands": {
+          "type": "object",
+          "required": [
+            "red",
+            "orange",
+            "amber",
+            "lime",
+            "green",
+            "spring",
+            "cyan",
+            "azure",
+            "blue",
+            "violet",
+            "magenta",
+            "pink"
+          ],
+          "properties": {
+            "red": { "type": "number", "minimum": 0, "maximum": 100 },
+            "orange": { "type": "number", "minimum": 0, "maximum": 100 },
+            "amber": { "type": "number", "minimum": 0, "maximum": 100 },
+            "lime": { "type": "number", "minimum": 0, "maximum": 100 },
+            "green": { "type": "number", "minimum": 0, "maximum": 100 },
+            "spring": { "type": "number", "minimum": 0, "maximum": 100 },
+            "cyan": { "type": "number", "minimum": 0, "maximum": 100 },
+            "azure": { "type": "number", "minimum": 0, "maximum": 100 },
+            "blue": { "type": "number", "minimum": 0, "maximum": 100 },
+            "violet": { "type": "number", "minimum": 0, "maximum": 100 },
+            "magenta": { "type": "number", "minimum": 0, "maximum": 100 },
+            "pink": { "type": "number", "minimum": 0, "maximum": 100 }
+          },
+          "unevaluatedProperties": false
+        }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

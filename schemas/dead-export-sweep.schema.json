@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TeacherEvan/surgical-audit/schemas/dead-export-sweep.schema.json",
+  "title": "Surgical Audit Dead Export Sweep Output",
+  "type": "object",
+  "required": [
+    "repo_root",
+    "src_filter",
+    "files_scanned",
+    "source_files_scanned",
+    "distinct_exports",
+    "dead_value_exports",
+    "test_only_exports",
+    "dead_type_exports",
+    "duplicate_export_names"
+  ],
+  "properties": {
+    "repo_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "src_filter": {
+      "type": "string"
+    },
+    "files_scanned": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_files_scanned": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "distinct_exports": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dead_value_exports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exportEntry" }
+    },
+    "test_only_exports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exportEntry" }
+    },
+    "dead_type_exports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exportEntry" }
+    },
+    "duplicate_export_names": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 2,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "exportEntry": {
+      "type": "object",
+      "required": ["path", "line", "name", "kind", "test_refs"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "test_refs": { "type": "integer", "minimum": 0 }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}
