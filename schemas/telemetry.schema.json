@@ -97,6 +97,8 @@
         "max_function_loc",
         "silent_catches",
         "hot_loop_markers",
+        "silent_catch_lines",
+        "hot_loop_lines",
         "branch_density",
         "risk_score",
         "high_complexity_functions",
@@ -113,6 +115,14 @@
         "max_function_loc": { "type": "integer", "minimum": 0 },
         "silent_catches": { "type": "integer", "minimum": 0 },
         "hot_loop_markers": { "type": "integer", "minimum": 0 },
+        "silent_catch_lines": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "hot_loop_lines": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
         "branch_density": { "type": "number", "minimum": 0 },
         "risk_score": { "type": "number", "minimum": 0 },
         "high_complexity_functions": {

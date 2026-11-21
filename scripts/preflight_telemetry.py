@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""preflight_telemetry.py (v2.4.0) — Surgical Audit polyglot static scanner.
+"""preflight_telemetry.py (v3.0.0) — Surgical Audit polyglot static scanner.
 
 Zero-mutation, read-only repository telemetry for the surgical-audit skill.
 Scans a target directory and emits:
@@ -39,7 +39,7 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VERSION = "2.4.0"
+VERSION = "3.0.0"
 SARIF_SCHEMA_URL = "https://json.schemastore.org/sarif-2.1.0.json"
 
 GOD_FILE_LOC = 400
@@ -62,6 +62,14 @@ PRUNE_DIRS: frozenset[str] = frozenset(
         ".mypy_cache",
         "venv",
         ".venv",
+        "target",
+        "vendor",
+        ".svelte-kit",
+        ".nuxt",
+        "coverage",
+        "out",
+        ".cache",
+        "storybook-static",
     }
 )
 
@@ -98,13 +106,13 @@ CODE_EXTENSIONS: frozenset[str] = (
 )
 
 BRANCH_KEYWORDS = re.compile(
-    r"\b(?:if|elif|else|for|while|match|case|catch|except|and|or)\b"
+    r"\b(?:if|elif|for|while|match|case|catch|except|and|or)\b"
 )
 BRANCH_OPERATORS = re.compile(r"(?<!\?)\?(?![.:?])|\?\?|&&|\|\|")
 
 POLYGLOT_FUNC_REGEX = re.compile(
     r"(?:(?:async\s+)?(?:function\s*\*?\s+|def\s+|func\s+|fn\s+|sub\s+)"
-    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*[\((]"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)(?:<[^>]*>)?\s*[\((]"
     r"|(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
     r"(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>)"
 )
@@ -130,27 +138,17 @@ _CC_SIMPLE_NODES: tuple[type[ast.AST], ...] = (
     ast.AsyncFor,
     ast.While,
     ast.ExceptHandler,
-    ast.With,
-    ast.AsyncWith,
     ast.IfExp,
 )
 
 _MATCH_CASE_TYPE: type[ast.AST] | None = getattr(ast, "MatchCase", None)
 
-_HOT_LOOP_TRIGGERS: tuple[str, ...] = (
-    "requestanimationframe",
-    "_process(",
-    "update(",
-    "void update(",
-    "fixedupdate(",
-    "ondraw(",
-    "render(",
-    "foreach(",
-    ".map(",
-    ".filter(",
-    "new vector2",
-    "new color",
+_HOT_LOOP_UNCOND = re.compile(
+    r"\b(?:requestAnimationFrame|_process|FixedUpdate|LateUpdate|Update|onDraw|render)"
+    r"\s*\(|\bnew\s+(?:Vector[234]|Color|Quaternion|Matrix[34])\b",
+    re.IGNORECASE,
 )
+_HOT_LOOP_GATED = re.compile(r"\.(?:map|filter|forEach)\s*\(", re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # Hashing / repository traversal
@@ -158,8 +156,12 @@ _HOT_LOOP_TRIGGERS: tuple[str, ...] = (
 
 
 def sha256_file(path: str) -> str:
-    """Return the SHA-256 hex digest of a file."""
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    """Return the SHA-256 hex digest of a file using streaming 64 KiB chunks."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _walk_repository(root: str) -> tuple[str, int, list[tuple[str, str]]]:
@@ -239,36 +241,176 @@ def _consume_quoted(
     return out, i
 
 
-def _strip_c_style(source: str, *, mask_strings: bool) -> str:
-    """Strip // and /* */ comments (and optionally strings) keeping newlines."""
-    out: list[str] = []
-    i = 0
+_REGEX_PREFIX_CHARS = frozenset("(,=:[!&|?{};+-*%~^<>")
+_REGEX_KEYWORD_RE = re.compile(
+    r"\b(?:return|case|throw|in|of|typeof|void|delete|await|yield|new|else|do|"
+    r"export|default)\s*$"
+)
+
+
+def _regex_can_start(prev: str, source: str, i: int) -> bool:
+    """Disambiguate a regex literal from division using the preceding token."""
+    if prev == "":
+        return True
+    if prev in ("string", "regex"):
+        return False
+    if prev in _REGEX_PREFIX_CHARS:
+        return not (prev in "+-" and i >= 2 and source[i - 2] == prev)
+    if prev in ")]" or prev.isalnum() or prev in "_$":
+        return bool(_REGEX_KEYWORD_RE.search(source[max(0, i - 16) : i]))
+    return False
+
+
+def _consume_regex(
+    source: str, start: int, *, mask_strings: bool
+) -> tuple[list[str], int]:
+    """Consume a /.../flags regex literal, honouring [...] character classes."""
+    out = [" " if mask_strings else "/"]
+    i = start + 1
+    n = len(source)
+    in_class = False
+    while i < n:
+        ch = source[i]
+        if ch == "\\":
+            nxt = source[i + 1] if i + 1 < n else ""
+            out.append(" " if mask_strings else ch)
+            if nxt:
+                out.append("\n" if nxt == "\n" else (" " if mask_strings else nxt))
+            i += 2 if nxt else 1
+            continue
+        if ch == "[":
+            in_class = True
+        elif ch == "]":
+            in_class = False
+        elif ch == "/" and not in_class:
+            out.append(" " if mask_strings else "/")
+            i += 1
+            while i < n and source[i].isalpha():
+                out.append(" " if mask_strings else source[i])
+                i += 1
+            return out, i
+        if ch == "\n":
+            out.append("\n")
+            return out, i + 1
+        out.append(" " if mask_strings else ch)
+        i += 1
+    return out, i
+
+
+def _consume_template(
+    source: str, start: int, *, mask_strings: bool
+) -> tuple[list[str], int]:
+    """Mask static template text while preserving ${...} code expressions."""
+    out = [" " if mask_strings else "`"]
+    i = start + 1
     n = len(source)
     while i < n:
         ch = source[i]
-        nxt = source[i + 1] if i + 1 < n else ""
-        if ch == "/" and nxt == "/":
-            while i < n and source[i] != "\n":
-                out.append(" ")
-                i += 1
+        if ch == "\\":
+            nxt = source[i + 1] if i + 1 < n else ""
+            out.append(" " if mask_strings else ch)
+            if nxt:
+                out.append("\n" if nxt == "\n" else (" " if mask_strings else nxt))
+            i += 2 if nxt else 1
             continue
-        if ch == "/" and nxt == "*":
-            out.extend((" ", " "))
-            i += 2
-            while i < n:
-                if source[i] == "*" and i + 1 < n and source[i + 1] == "/":
-                    out.extend((" ", " "))
-                    i += 2
-                    break
-                out.append("\n" if source[i] == "\n" else " ")
-                i += 1
+        if ch == "`":
+            out.append(" " if mask_strings else "`")
+            return out, i + 1
+        if ch == "$" and i + 1 < n and source[i + 1] == "{":
+            out.extend(("$", "{"))
+            expr, i = _mask_c_segment(
+                source, i + 2, mask_strings=mask_strings, stop_on_rbrace=True
+            )
+            out.extend(expr)
             continue
-        if ch in ("'", '"', "`"):
-            chunk, i = _consume_quoted(source, i, ch, mask_strings=mask_strings)
+        out.append("\n" if ch == "\n" else (" " if mask_strings else ch))
+        i += 1
+    return out, i
+
+
+def _consume_c_comment(source: str, i: int) -> tuple[list[str], int] | None:
+    """Consume a // or /* */ comment at i, or return None when not a comment."""
+    n = len(source)
+    nxt = source[i + 1] if i + 1 < n else ""
+    if source[i] == "/" and nxt == "/":
+        line_out: list[str] = []
+        while i < n and source[i] != "\n":
+            line_out.append(" ")
+            i += 1
+        return line_out, i
+    if source[i] == "/" and nxt == "*":
+        block_out: list[str] = [" ", " "]
+        i += 2
+        while i < n:
+            if source[i] == "*" and i + 1 < n and source[i + 1] == "/":
+                block_out.extend((" ", " "))
+                i += 2
+                break
+            block_out.append("\n" if source[i] == "\n" else " ")
+            i += 1
+        return block_out, i
+    return None
+
+
+def _consume_c_literal(
+    source: str, i: int, ch: str, prev: str, *, mask_strings: bool
+) -> tuple[list[str], int, str] | None:
+    """Consume a regex/quote/template literal at i, returning (out, i, prev)."""
+    if ch == "/" and _regex_can_start(prev, source, i):
+        regex_out, j = _consume_regex(source, i, mask_strings=mask_strings)
+        return regex_out, j, "regex"
+    if ch in ("'", '"'):
+        quote_out, j = _consume_quoted(source, i, ch, mask_strings=mask_strings)
+        return quote_out, j, "string"
+    if ch == "`":
+        tpl_out, j = _consume_template(source, i, mask_strings=mask_strings)
+        return tpl_out, j, "string"
+    return None
+
+
+def _mask_c_segment(
+    source: str,
+    start: int,
+    *,
+    mask_strings: bool,
+    stop_on_rbrace: bool = False,
+) -> tuple[list[str], int]:
+    """Mask C-style comments/strings/regex/templates, preserving line numbers."""
+    out: list[str] = []
+    i = start
+    n = len(source)
+    brace_depth = int(stop_on_rbrace)
+    prev = ""
+    while i < n:
+        ch = source[i]
+        if stop_on_rbrace and ch in ("{", "}"):
+            brace_depth += 1 if ch == "{" else -1
+            out.append(ch)
+            prev = ch
+            i += 1
+            if brace_depth == 0:
+                return out, i
+            continue
+        comment = _consume_c_comment(source, i)
+        if comment is not None:
+            chunk, i = comment
+            out.extend(chunk)
+            continue
+        literal = _consume_c_literal(source, i, ch, prev, mask_strings=mask_strings)
+        if literal is not None:
+            chunk, i, prev = literal
             out.extend(chunk)
             continue
         out.append(ch)
+        if not ch.isspace():
+            prev = ch
         i += 1
+    return out, i
+
+
+def _strip_c_style(source: str, *, mask_strings: bool) -> str:
+    """Strip // and /* */ comments, strings, regex and templates keeping newlines."""
+    out, _ = _mask_c_segment(source, 0, mask_strings=mask_strings)
     return "".join(out)
 
 
@@ -324,6 +466,27 @@ def _strip_python_tokens(source: str) -> str:
     return "".join("".join(row) for row in grid)
 
 
+_SFC_SCRIPT_RE = re.compile(r"<script\b[^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL)
+SFC_EXTENSIONS: frozenset[str] = frozenset({".svelte", ".vue"})
+
+
+def _mask_keep_newlines(text: str) -> str:
+    """Replace every character with a space except newlines (line-preserving)."""
+    return "".join("\n" if ch == "\n" else " " for ch in text)
+
+
+def _extract_sfc_scripts(source: str) -> str:
+    """Isolate <script> blocks in .svelte/.vue, masking markup/CSS outside them."""
+    out: list[str] = []
+    last = 0
+    for match in _SFC_SCRIPT_RE.finditer(source):
+        out.append(_mask_keep_newlines(source[last : match.start(1)]))
+        out.append(match.group(1))
+        last = match.end(1)
+    out.append(_mask_keep_newlines(source[last:]))
+    return "".join(out)
+
+
 def strip_comments(source: str, ext: str) -> str:
     """Strip comments for the given extension while keeping line numbers."""
     if ext in PYTHON_EXTENSIONS:
@@ -332,6 +495,8 @@ def strip_comments(source: str, ext: str) -> str:
         return _strip_hash_or_lua(source, "#", mask_strings=False)
     if ext == ".lua":
         return _strip_hash_or_lua(source, "--", mask_strings=False)
+    if ext in SFC_EXTENSIONS:
+        source = _extract_sfc_scripts(source)
     return _strip_c_style(source, mask_strings=False)
 
 
@@ -343,6 +508,8 @@ def strip_comments_and_strings(source: str, ext: str) -> str:
         return _strip_hash_or_lua(source, "#", mask_strings=True)
     if ext == ".lua":
         return _strip_hash_or_lua(source, "--", mask_strings=True)
+    if ext in SFC_EXTENSIONS:
+        source = _extract_sfc_scripts(source)
     return _strip_c_style(source, mask_strings=True)
 
 
@@ -399,47 +566,71 @@ def _is_noop_stmt(stmt: ast.stmt) -> bool:
     return False
 
 
-def _python_silent_catches_fallback(source: str) -> int:
+def _python_silent_catch_lines_fallback(source: str) -> list[int]:
     pattern = re.compile(
         r"^\s*except(?:\s+[^:\n]+)?\s*:\s*(?:pass|\.\.\.)?\s*(?:#.*)?$",
         re.MULTILINE,
     )
     lines = source.splitlines()
-    count = 0
+    found: list[int] = []
     for match in pattern.finditer(source):
         matched_text = match.group(0).strip()
-        if matched_text.endswith(("pass", "...")):
-            count += 1
-            continue
         line_idx = source[: match.start()].count("\n")
+        if matched_text.endswith(("pass", "...")):
+            found.append(line_idx + 1)
+            continue
         nxt = lines[line_idx + 1].strip() if line_idx + 1 < len(lines) else ""
         if nxt in ("pass", "...", "") or nxt.startswith("#"):
-            count += 1
-    return count
+            found.append(line_idx + 1)
+    return found
 
 
-def silent_catches(source: str, ext: str) -> int:
-    """Count empty or no-op exception handlers."""
+def silent_catch_lines(source: str, ext: str) -> list[int]:
+    """Return 1-based line numbers of empty or no-op exception handlers."""
     if ext in PYTHON_EXTENSIONS:
         try:
             tree = ast.parse(source)
         except SyntaxError:
-            return _python_silent_catches_fallback(source)
-        return sum(
-            1
+            return _python_silent_catch_lines_fallback(source)
+        return sorted(
+            node.lineno
             for node in ast.walk(tree)
             if isinstance(node, ast.ExceptHandler)
             and all(_is_noop_stmt(stmt) for stmt in node.body)
         )
-
     cleaned = strip_comments(source, ext)
-    return len(re.findall(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}", cleaned))
+    return sorted(
+        cleaned[: m.start()].count("\n") + 1
+        for m in re.finditer(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}", cleaned)
+    )
+
+
+def silent_catches(source: str, ext: str) -> int:
+    """Count empty or no-op exception handlers."""
+    return len(silent_catch_lines(source, ext))
+
+
+def _hot_loop_hits(source: str, ext: str) -> list[int]:
+    """Return 1-based hot-loop marker lines; gated callbacks require a loop."""
+    cleaned = strip_comments_and_strings(source, ext)
+    uncond = list(_HOT_LOOP_UNCOND.finditer(cleaned))
+    hits = [cleaned[: m.start()].count("\n") + 1 for m in uncond]
+    if uncond:
+        hits.extend(
+            cleaned[: m.start()].count("\n") + 1
+            for m in _HOT_LOOP_GATED.finditer(cleaned)
+        )
+    return sorted(hits)
 
 
 def hot_loop_markers(source: str, ext: str) -> int:
     """Count per-frame / hot-loop allocation markers outside comments/strings."""
-    cleaned = strip_comments_and_strings(source, ext).lower()
-    return sum(cleaned.count(trig) for trig in _HOT_LOOP_TRIGGERS)
+    return len(_hot_loop_hits(source, ext))
+
+
+def hot_loop_lines(source: str, ext: str) -> list[int]:
+    """Return 1-based line numbers of hot-loop allocation markers."""
+    return _hot_loop_hits(source, ext)
 
 
 def count_polyglot_branches(snippet: str) -> int:
@@ -669,8 +860,10 @@ def scan_file(path: str) -> dict[str, Any]:
         return {"skipped": True, "reason": str(exc)}
 
     loc = effective_loc(source, ext)
-    catches = silent_catches(source, ext)
-    hot = hot_loop_markers(source, ext)
+    catch_lines = silent_catch_lines(source, ext)
+    hot_lines = hot_loop_lines(source, ext)
+    catches = len(catch_lines)
+    hot = len(hot_lines)
 
     if ext in PYTHON_EXTENSIONS:
         py = analyze_python(source)
@@ -699,6 +892,8 @@ def scan_file(path: str) -> dict[str, Any]:
         "max_function_loc": max_func_loc,
         "silent_catches": catches,
         "hot_loop_markers": hot,
+        "silent_catch_lines": catch_lines,
+        "hot_loop_lines": hot_lines,
         "branch_density": round(branch_density, 4),
         "risk_score": round(risk, 2),
         "high_complexity_functions": funcs,
@@ -806,7 +1001,11 @@ def _sarif_result(
     rel_path: str,
     start_line: int = 1,
     properties: dict[str, Any] | None = None,
+    end_line: int | None = None,
 ) -> dict[str, Any]:
+    region: dict[str, Any] = {"startLine": max(1, start_line)}
+    if end_line is not None:
+        region["endLine"] = max(region["startLine"], end_line)
     item: dict[str, Any] = {
         "ruleId": rule_id,
         "ruleIndex": _RULE_INDEX[rule_id],
@@ -819,7 +1018,7 @@ def _sarif_result(
                         "uri": rel_path,
                         "uriBaseId": "%SRCROOT%",
                     },
-                    "region": {"startLine": max(1, start_line)},
+                    "region": region,
                 }
             }
         ],
@@ -827,6 +1026,89 @@ def _sarif_result(
     if properties:
         item["properties"] = properties
     return item
+
+
+def _fn_cc(fn: dict[str, Any]) -> int:
+    """Read a function span's CC regardless of Python/polyglot field naming."""
+    return int(fn.get("estimated_cc", fn.get("estimated_cc_window", 1)))
+
+
+def _complexity_sarif_results(record: dict[str, Any], rel: str) -> list[dict[str, Any]]:
+    """Emit SA-HIGH-COMPLEXITY with exact per-function start/end line spans."""
+    if not record.get("high_complexity"):
+        return []
+    props = {
+        "cyclomatic_complexity": record["cyclomatic_complexity"],
+        "nesting_depth": record["nesting_depth"],
+        "max_function_loc": record["max_function_loc"],
+    }
+    funcs = record.get("high_complexity_functions") or []
+    hot_funcs = [
+        f
+        for f in funcs
+        if _fn_cc(f) >= HIGH_CC_THRESHOLD or int(f["loc"]) >= HOT_LOC_THRESHOLD
+    ]
+    if hot_funcs:
+        return [
+            _sarif_result(
+                "SA-HIGH-COMPLEXITY",
+                "warning",
+                f"{rel}:{f['start_line']} {f['name']} exceeds complexity thresholds.",
+                rel,
+                start_line=int(f["start_line"]),
+                end_line=int(f["end_line"]),
+                properties=props,
+            )
+            for f in hot_funcs
+        ]
+    top_line = int(funcs[0]["start_line"]) if funcs else 1
+    cc_val = record["cyclomatic_complexity"]
+    return [
+        _sarif_result(
+            "SA-HIGH-COMPLEXITY",
+            "warning",
+            (
+                f"{rel} flagged for complexity (CC={cc_val}, "
+                f"nesting={record['nesting_depth']}, "
+                f"max_function_loc={record['max_function_loc']})."
+            ),
+            rel,
+            start_line=top_line,
+            properties=props,
+        )
+    ]
+
+
+def _marker_sarif_results(
+    record: dict[str, Any],
+    rel: str,
+    lines_key: str,
+    count_key: str,
+    rule_id: str,
+    level: str,
+    label: str,
+) -> list[dict[str, Any]]:
+    """Emit one SARIF result per exact line, falling back to an aggregate."""
+    lines = record.get(lines_key) or []
+    if lines:
+        return [
+            _sarif_result(
+                rule_id, level, f"{rel}:{line} {label}.", rel, start_line=int(line)
+            )
+            for line in lines
+        ]
+    count = int(record.get(count_key, 0))
+    if count > 0:
+        return [
+            _sarif_result(
+                rule_id,
+                level,
+                f"{rel} contains {count} {label}(s).",
+                rel,
+                properties={count_key: count},
+            )
+        ]
+    return []
 
 
 def _file_sarif_results(record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -852,48 +1134,29 @@ def _file_sarif_results(record: dict[str, Any]) -> list[dict[str, Any]]:
                 properties={"effective_loc": eff_loc},
             )
         )
-    if record.get("high_complexity"):
-        funcs = record.get("high_complexity_functions") or []
-        top_line = int(funcs[0]["start_line"]) if funcs else 1
-        cc_val = record["cyclomatic_complexity"]
-        results.append(
-            _sarif_result(
-                "SA-HIGH-COMPLEXITY",
-                "warning",
-                (
-                    f"{rel} flagged for complexity (CC={cc_val}, "
-                    f"nesting={record['nesting_depth']}, "
-                    f"max_function_loc={record['max_function_loc']})."
-                ),
-                rel,
-                start_line=top_line,
-                properties={
-                    "cyclomatic_complexity": record["cyclomatic_complexity"],
-                    "nesting_depth": record["nesting_depth"],
-                    "max_function_loc": record["max_function_loc"],
-                },
-            )
+    results.extend(_complexity_sarif_results(record, rel))
+    results.extend(
+        _marker_sarif_results(
+            record,
+            rel,
+            "silent_catch_lines",
+            "silent_catches",
+            "SA-SILENT-CATCH",
+            "error",
+            "silent catch handler swallows errors",
         )
-    if int(record.get("silent_catches", 0)) > 0:
-        results.append(
-            _sarif_result(
-                "SA-SILENT-CATCH",
-                "error",
-                f"{rel} contains {record['silent_catches']} silent catch handler(s).",
-                rel,
-                properties={"silent_catches": record["silent_catches"]},
-            )
+    )
+    results.extend(
+        _marker_sarif_results(
+            record,
+            rel,
+            "hot_loop_lines",
+            "hot_loop_markers",
+            "SA-HOT-LOOP",
+            "note",
+            "hot-loop allocation/callback marker",
         )
-    if int(record.get("hot_loop_markers", 0)) > 0:
-        results.append(
-            _sarif_result(
-                "SA-HOT-LOOP",
-                "note",
-                f"{rel} contains {record['hot_loop_markers']} hot-loop marker(s).",
-                rel,
-                properties={"hot_loop_markers": record["hot_loop_markers"]},
-            )
-        )
+    )
     return results
 
 

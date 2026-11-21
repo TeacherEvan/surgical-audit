@@ -12,6 +12,7 @@
     "dead_value_exports",
     "test_only_exports",
     "dead_type_exports",
+    "dead_barrels",
     "duplicate_export_names"
   ],
   "properties": {
@@ -45,6 +46,10 @@
     "dead_type_exports": {
       "type": "array",
       "items": { "$ref": "#/$defs/exportEntry" }
+    },
+    "dead_barrels": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
     },
     "duplicate_export_names": {
       "type": "object",

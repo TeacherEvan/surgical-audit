@@ -1,6 +1,6 @@
 [project]
 name = "surgical-audit"
-version = "2.4.0"
+version = "3.0.0"
 description = "Zero-mutation 10-lens code, runtime-geometry, and document audit skill."
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -8,6 +8,12 @@ license = { text = "MIT" }
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "C901", "EXE"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
 # Keep canonical conform.py byte-identical across the skill family.

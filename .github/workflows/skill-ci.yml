@@ -18,28 +18,42 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install lint and test dependencies
+      - name: Install pinned lint and test dependencies
         run: |
           python -m pip install --upgrade pip
           pip install \
-            pytest ruff mypy pyyaml jsonschema check-jsonschema yamllint
+            pytest==8.3.4 \
+            ruff==0.8.6 \
+            mypy==1.14.1 \
+            pyyaml==6.0.2 \
+            jsonschema==4.23.0 \
+            check-jsonschema==0.30.0 \
+            yamllint==1.35.1
           sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Conformance gate
-        run: python3 -B scripts/conform.py
+          npm install -g markdownlint-cli
+      - name: Conformance and TOML syntax gate
+        run: |
+          python3 -B scripts/conform.py
+          python3 -c "import pathlib, tomllib; \
+            tomllib.loads(pathlib.Path('pyproject.toml').read_text('utf-8'))"
       - name: Lint and typecheck Python
         run: |
           ruff check --no-cache scripts/ tests/
-          ruff check --no-cache --select E,W,F,I,B,UP,SIM,C901,EXE \
-            scripts/ tests/
           ruff format --check --no-cache scripts/ tests/
           mypy --strict --cache-dir /tmp/mypy_cache_sa scripts/ tests/
-      - name: Run unit tests
-        run: pytest -o cache_dir=/tmp/pytest_cache_sa -v tests/
+      - name: Run Python and Node unit tests
+        run: |
+          pytest -o cache_dir=/tmp/pytest_cache_sa -v tests/
+          node --check scripts/canvas_geometry_probe.mjs
+          node --check scripts/canvas_probe_core.mjs
+          node --test tests/canvas_probe_core.test.mjs
       - name: Lint shell scripts and CI workflow
         run: |
           shellcheck -x install_surgical_audit.sh scripts/sync-skill.sh
           yamllint --strict .github/workflows/skill-ci.yml
-      - name: Check JS probe syntax
-        run: node --check scripts/canvas_geometry_probe.mjs
+      - name: Lint Markdown
+        run: |
+          markdownlint --disable MD013 -- \
+            *.md references/*.md templates/*.md docs/adr/*.md
       - name: Validate Draft 2020-12 JSON Schemas
         run: check-jsonschema --check-metaschema schemas/*.schema.json

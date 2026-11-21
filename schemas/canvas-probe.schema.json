@@ -47,10 +47,68 @@
         { "$ref": "#/$defs/hueError" },
         { "$ref": "#/$defs/hueHistogram" }
       ]
+    },
+    "viewport": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      },
+      "unevaluatedProperties": false
+    },
+    "clicks": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "wcag": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/wcagReport" }
+      ]
     }
   },
   "unevaluatedProperties": false,
   "$defs": {
+    "wcagReport": {
+      "type": "object",
+      "required": ["targetSize", "focusObscured", "media"],
+      "properties": {
+        "targetSize": {
+          "type": "object",
+          "required": ["minimumPx", "smallTargets"],
+          "properties": {
+            "minimumPx": { "type": "integer", "minimum": 1 },
+            "smallTargets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["tag", "width", "height"],
+                "properties": {
+                  "tag": { "type": "string" },
+                  "width": { "type": "integer", "minimum": 0 },
+                  "height": { "type": "integer", "minimum": 0 }
+                },
+                "unevaluatedProperties": false
+              }
+            }
+          },
+          "unevaluatedProperties": false
+        },
+        "focusObscured": { "type": "boolean" },
+        "media": {
+          "type": "object",
+          "required": ["prefersReducedMotion", "prefersContrast", "forcedColors"],
+          "properties": {
+            "prefersReducedMotion": { "type": "boolean" },
+            "prefersContrast": { "type": "boolean" },
+            "forcedColors": { "type": "boolean" }
+          },
+          "unevaluatedProperties": false
+        }
+      },
+      "unevaluatedProperties": false
+    },
     "requestFailure": {
       "type": "object",
       "required": ["url", "errorText"],

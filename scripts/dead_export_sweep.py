@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import sys
 from collections import Counter, defaultdict
@@ -100,6 +101,7 @@ class SweepSummary(TypedDict):
     dead_value: list[ExportRow]
     test_only: list[ExportRow]
     dead_type: list[ExportRow]
+    dead_barrels: list[str]
     duplicates: dict[str, list[str]]
 
 
@@ -109,51 +111,57 @@ def is_test_path(path: str) -> bool:
     return bool(TEST_FILE_RE.search(path)) or bool(TEST_DIR_PARTS & set(parts))
 
 
-def _scan_quoted_literal(text: str, start: int, quote: str) -> tuple[list[str], int]:
+def _scan_quoted_literal(
+    text: str, start: int, quote: str, *, mask_strings: bool = True
+) -> tuple[list[str], int]:
     """Mask string literal contents with spaces while keeping newlines."""
-    out = [" "]
+    out = [" " if mask_strings else quote]
     i = start + 1
     n = len(text)
     while i < n:
         ch = text[i]
         if ch == "\\":
             nxt = text[i + 1] if i + 1 < n else ""
-            out.append(" ")
+            out.append(" " if mask_strings else ch)
             if nxt:
-                out.append("\n" if nxt == "\n" else " ")
+                out.append("\n" if nxt == "\n" else (" " if mask_strings else nxt))
             i += 2 if nxt else 1
             continue
         if ch == quote:
-            out.append(" ")
+            out.append(" " if mask_strings else quote)
             return out, i + 1
-        out.append("\n" if ch == "\n" else " ")
+        out.append("\n" if ch == "\n" else (" " if mask_strings else ch))
         i += 1
     return out, i
 
 
-def _scan_template_literal(text: str, start: int) -> tuple[list[str], int]:
+def _scan_template_literal(
+    text: str, start: int, *, mask_strings: bool = True
+) -> tuple[list[str], int]:
     """Mask static template text while preserving ${...} code expressions."""
-    out = [" "]
+    out = [" " if mask_strings else "`"]
     i = start + 1
     n = len(text)
     while i < n:
         ch = text[i]
         if ch == "\\":
             nxt = text[i + 1] if i + 1 < n else ""
-            out.append(" ")
+            out.append(" " if mask_strings else ch)
             if nxt:
-                out.append("\n" if nxt == "\n" else " ")
+                out.append("\n" if nxt == "\n" else (" " if mask_strings else nxt))
             i += 2 if nxt else 1
             continue
         if ch == "`":
-            out.append(" ")
+            out.append(" " if mask_strings else "`")
             return out, i + 1
         if ch == "$" and i + 1 < n and text[i + 1] == "{":
             out.extend(["$", "{"])
-            expr, i = _mask_code_segment(text, i + 2, stop_on_rbrace=True)
+            expr, i = _mask_code_segment(
+                text, i + 2, stop_on_rbrace=True, mask_strings=mask_strings
+            )
             out.extend(expr)
             continue
-        out.append("\n" if ch == "\n" else " ")
+        out.append("\n" if ch == "\n" else (" " if mask_strings else ch))
         i += 1
     return out, i
 
@@ -177,6 +185,7 @@ def _mask_code_segment(
     start: int = 0,
     *,
     stop_on_rbrace: bool = False,
+    mask_strings: bool = True,
 ) -> tuple[list[str], int]:
     """Mask comments and static strings from start, preserving line numbers."""
     out: list[str] = []
@@ -205,9 +214,9 @@ def _mask_code_segment(
             continue
         if ch in ("'", '"', "`"):
             chunk, i = (
-                _scan_quoted_literal(text, i, ch)
+                _scan_quoted_literal(text, i, ch, mask_strings=mask_strings)
                 if ch in ("'", '"')
-                else _scan_template_literal(text, i)
+                else _scan_template_literal(text, i, mask_strings=mask_strings)
             )
             out.extend(chunk)
             continue
@@ -219,6 +228,12 @@ def _mask_code_segment(
 def mask_comments_and_strings(text: str) -> str:
     """Return text with comments and static string literals replaced by spaces."""
     out, _ = _mask_code_segment(text, 0, stop_on_rbrace=False)
+    return "".join(out)
+
+
+def strip_comments(text: str) -> str:
+    """Return text with comments masked but string literals kept intact."""
+    out, _ = _mask_code_segment(text, 0, stop_on_rbrace=False, mask_strings=False)
     return "".join(out)
 
 
@@ -313,25 +328,253 @@ def _extract_exports(masked_text: str) -> list[tuple[int, str, str]]:
     return found
 
 
+REEXPORT_NAMED_RE = re.compile(
+    r"^[ \t]*export[ \t]+(?:type[ \t]+)?\{(?P<body>[^}]+)\}"
+    r"[ \t]*from[ \t]*['\"](?P<spec>[^'\"]+)['\"]",
+    re.MULTILINE,
+)
+REEXPORT_STAR_RE = re.compile(
+    r"^[ \t]*export[ \t]+\*(?:[ \t]+as[ \t]+(?P<ns>[A-Za-z_$][\w$]*))?"
+    r"[ \t]*from[ \t]*['\"](?P<spec>[^'\"]+)['\"]",
+    re.MULTILINE,
+)
+IMPORT_NAMED_RE = re.compile(
+    r"^[ \t]*import[ \t]+(?:type[ \t]+)?\{(?P<body>[^}]+)\}"
+    r"[ \t]*from[ \t]*['\"](?P<spec>[^'\"]+)['\"]",
+    re.MULTILINE,
+)
+IMPORT_DEFAULT_RE = re.compile(
+    r"^[ \t]*import[ \t]+(?P<name>[A-Za-z_$][\w$]*)"
+    r"[ \t]*from[ \t]*['\"](?P<spec>[^'\"]+)['\"]",
+    re.MULTILINE,
+)
+IMPORT_STAR_RE = re.compile(
+    r"^[ \t]*import[ \t]+\*[ \t]+as[ \t]+(?P<ns>[A-Za-z_$][\w$]*)"
+    r"[ \t]*from[ \t]*['\"](?P<spec>[^'\"]+)['\"]",
+    re.MULTILINE,
+)
+
+
+def _resolve_spec(importer: str, spec: str, texts: dict[str, str]) -> str | None:
+    """Resolve a relative import specifier to a collected file path."""
+    if not spec.startswith("."):
+        return None
+    base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), spec))
+    for ext in DEFAULT_EXTS:
+        if base + ext in texts:
+            return base + ext
+    for ext in DEFAULT_EXTS:
+        index = posixpath.join(base, "index" + ext)
+        if index in texts:
+            return index
+    return None
+
+
+def _named_items(body: str) -> list[tuple[str, str]]:
+    """Parse `a as b, c` into (original, exported) name pairs."""
+    items: list[tuple[str, str]] = []
+    for part in body.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if item.startswith("type "):
+            item = item[5:].strip()
+        if " as " in item:
+            orig, exported = (x.strip() for x in item.rsplit(" as ", 1))
+        else:
+            orig = exported = item
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", orig) and re.fullmatch(
+            r"[A-Za-z_$][\w$]*", exported
+        ):
+            items.append((orig, exported))
+    return items
+
+
+def _collect_reexports(
+    masked: str, rel: str, texts: dict[str, str]
+) -> list[tuple[str, str, str]]:
+    """Return (target_file, original_name, exported_name) re-export edges."""
+    edges: list[tuple[str, str, str]] = []
+    for match in REEXPORT_NAMED_RE.finditer(masked):
+        target = _resolve_spec(rel, match.group("spec"), texts)
+        if target is None:
+            continue
+        for orig, exported in _named_items(match.group("body")):
+            edges.append((target, orig, exported))
+    for match in REEXPORT_STAR_RE.finditer(masked):
+        target = _resolve_spec(rel, match.group("spec"), texts)
+        if target is not None:
+            edges.append((target, "*", match.group("ns") or "*"))
+    return edges
+
+
+def _collect_imports(
+    masked: str, rel: str, texts: dict[str, str]
+) -> set[tuple[str, str]]:
+    """Return (target_file, imported_name) edges; '*' means namespace import."""
+    edges: set[tuple[str, str]] = set()
+    for match in IMPORT_NAMED_RE.finditer(masked):
+        target = _resolve_spec(rel, match.group("spec"), texts)
+        if target is None:
+            continue
+        for orig, _exported in _named_items(match.group("body")):
+            edges.add((target, orig))
+    for match in IMPORT_DEFAULT_RE.finditer(masked):
+        target = _resolve_spec(rel, match.group("spec"), texts)
+        if target is not None:
+            edges.add((target, "default"))
+    for match in IMPORT_STAR_RE.finditer(masked):
+        target = _resolve_spec(rel, match.group("spec"), texts)
+        if target is not None:
+            edges.add((target, "*"))
+    return edges
+
+
+def _strip_reexport_lines(masked: str) -> str:
+    """Blank re-export statements so barrels never count as consumption."""
+    stripped = REEXPORT_NAMED_RE.sub(" ", masked)
+    return REEXPORT_STAR_RE.sub(" ", stripped)
+
+
+def _is_pure_barrel(masked: str, reexports: list[tuple[str, str, str]]) -> bool:
+    """A pure barrel has re-exports and no other executable statements."""
+    if not reexports:
+        return False
+    stripped = _strip_reexport_lines(masked)
+    stripped = IMPORT_NAMED_RE.sub(" ", stripped)
+    stripped = IMPORT_DEFAULT_RE.sub(" ", stripped)
+    stripped = IMPORT_STAR_RE.sub(" ", stripped)
+    return not stripped.replace(";", " ").strip()
+
+
+def _expand_import(
+    target: str,
+    name: str,
+    reexports: dict[str, list[tuple[str, str, str]]],
+    exports_by_file: dict[str, list[tuple[int, str, str]]],
+    pure_barrel: dict[str, bool],
+) -> list[tuple[str, str]]:
+    """Follow one import edge through barrel re-exports to concrete exports."""
+    if not pure_barrel.get(target):
+        if name == "*":
+            return [(target, n) for _, n, _ in exports_by_file.get(target, [])]
+        return [(target, name)]
+    out: list[tuple[str, str]] = []
+    for src, orig, exported in reexports.get(target, []):
+        if name not in ("*", exported, orig):
+            continue
+        if orig == "*":
+            out.extend((src, n) for _, n, _ in exports_by_file.get(src, []))
+        else:
+            out.append((src, orig))
+    return out
+
+
+def _production_live_edges(
+    imports: dict[str, set[tuple[str, str]]],
+    reexports: dict[str, list[tuple[str, str, str]]],
+    exports_by_file: dict[str, list[tuple[int, str, str]]],
+    pure_barrel: dict[str, bool],
+) -> set[tuple[str, str]]:
+    """Concrete (file, name) exports imported by non-test production files."""
+    live: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str]] = set()
+    queue: list[tuple[str, str]] = []
+    for rel, edges in imports.items():
+        if not is_test_path(rel):
+            queue.extend(edges)
+    while queue:
+        edge = queue.pop()
+        if edge in seen:
+            continue
+        seen.add(edge)
+        target, name = edge
+        for src, orig in _expand_import(
+            target, name, reexports, exports_by_file, pure_barrel
+        ):
+            if pure_barrel.get(src):
+                queue.append((src, orig))
+            else:
+                live.add((src, orig))
+    return live
+
+
+def _identifier_live(
+    rel: str,
+    name: str,
+    prod_files: list[str],
+    declared_names: dict[str, set[str]],
+    consumer: dict[str, Counter[str]],
+) -> bool:
+    """Fallback liveness: a non-barrel production consumer names the symbol."""
+    for other in prod_files:
+        if other == rel or name in declared_names[other]:
+            continue
+        if consumer[other].get(name, 0) > 0:
+            return True
+    return False
+
+
+def _dead_barrels(
+    pure_barrel: dict[str, bool],
+    imports: dict[str, set[tuple[str, str]]],
+) -> list[str]:
+    """Pure barrels with no non-test, non-barrel production importer."""
+    imported_targets = {
+        target
+        for rel, edges in imports.items()
+        if not is_test_path(rel) and not pure_barrel[rel]
+        for target, _name in edges
+    }
+    return sorted(
+        rel
+        for rel, is_barrel in pure_barrel.items()
+        if is_barrel and not is_test_path(rel) and rel not in imported_targets
+    )
+
+
 def analyze_exports(
     texts: dict[str, str],
     src_filter: str = "",
 ) -> SweepSummary:
-    """Compute dead-value, test-only, and dead-type export buckets."""
+    """Compute dead-value, test-only, dead-type, and dead-barrel buckets."""
     masked_by_file: dict[str, str] = {
         rel: mask_comments_and_strings(text) for rel, text in texts.items()
     }
-    file_tokens: dict[str, Counter[str]] = {}
-    code_tokens: Counter[str] = Counter()
+    comment_stripped: dict[str, str] = {
+        rel: strip_comments(text) for rel, text in texts.items()
+    }
+    exports_by_file = {
+        rel: _extract_exports(masked) for rel, masked in masked_by_file.items()
+    }
+    declared_names = {
+        rel: {name for _, name, _ in ex} for rel, ex in exports_by_file.items()
+    }
+    reexports = {
+        rel: _collect_reexports(comment_stripped[rel], rel, texts) for rel in texts
+    }
+    imports = {
+        rel: _collect_imports(comment_stripped[rel], rel, texts) for rel in texts
+    }
+    pure_barrel = {
+        rel: _is_pure_barrel(comment_stripped[rel], reexports[rel]) for rel in texts
+    }
+    consumer = {
+        rel: Counter(
+            IDENT_RE.findall(
+                mask_comments_and_strings(_strip_reexport_lines(comment_stripped[rel]))
+            )
+        )
+        for rel in texts
+    }
     test_tokens: Counter[str] = Counter()
-
     for rel, masked in masked_by_file.items():
-        toks = Counter(IDENT_RE.findall(masked))
-        file_tokens[rel] = toks
         if is_test_path(rel):
-            test_tokens.update(toks)
-        else:
-            code_tokens.update(toks)
+            test_tokens.update(IDENT_RE.findall(masked))
+    prod_live = _production_live_edges(imports, reexports, exports_by_file, pure_barrel)
+    prod_files = [
+        rel for rel in texts if not is_test_path(rel) and not pure_barrel[rel]
+    ]
 
     dead_value: list[ExportRow] = []
     test_only: list[ExportRow] = []
@@ -339,17 +582,16 @@ def analyze_exports(
     seen: dict[str, list[str]] = defaultdict(list)
     scoped_files = 0
 
-    for rel, masked in masked_by_file.items():
+    for rel in masked_by_file:
         if is_test_path(rel) or not _in_src_scope(rel, src_filter):
             continue
         scoped_files += 1
-        own_tokens = file_tokens[rel]
-        for line, name, kind in _extract_exports(masked):
+        for line, name, kind in exports_by_file[rel]:
             seen[name].append(rel)
-            own = own_tokens.get(name, 0)
-            code_refs = max(0, code_tokens.get(name, 0) - own)
             test_refs = test_tokens.get(name, 0)
-            if code_refs > 0:
+            if (rel, name) in prod_live or _identifier_live(
+                rel, name, prod_files, declared_names, consumer
+            ):
                 continue
             row: ExportRow = (rel, line, name, kind, test_refs)
             if test_refs > 0:
@@ -366,6 +608,7 @@ def analyze_exports(
         "dead_value": sorted(dead_value),
         "test_only": sorted(test_only),
         "dead_type": sorted(dead_type),
+        "dead_barrels": _dead_barrels(pure_barrel, imports),
         "duplicates": {n: p for n, p in seen.items() if len(p) > 1},
     }
 
@@ -489,6 +732,7 @@ def main(argv: list[str] | None = None) -> int:
             "dead_type_exports": [
                 _row_to_dict(r) for r in summary["dead_type"][: args.max]
             ],
+            "dead_barrels": summary["dead_barrels"][: args.max],
             "duplicate_export_names": summary["duplicates"],
         }
         print(json.dumps(payload, indent=2))

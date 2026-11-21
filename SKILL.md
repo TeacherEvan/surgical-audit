@@ -1,7 +1,7 @@
 ---
 name: surgical-audit
 description: "Use when auditing code read-only across 10 lenses, in MD."
-version: 2.4.0
+version: 3.0.0
 author: "TeacherEvan, Hermes Agent"
 license: MIT
 platforms: [linux, macos, windows]
@@ -13,7 +13,7 @@ metadata:
     related_skills: [surgical-investigation, surgical-implementation, surgical-hermesdothealth, surgical-orchestration]
 ---
 
-# Surgical Audit (v2.4 — Principal-10 Polyglot Multi-Pass Architecture)
+# Surgical Audit (v3.0 — Principal-10 Polyglot Multi-Pass Architecture)
 
 ## Overview
 
@@ -37,9 +37,11 @@ Execute a deterministic, zero-mutation architectural, code, and runtime-geometry
 
 Load detailed protocols, templates, and executable probes on demand using portable relative paths inside this skill directory:
 
-- `scripts/preflight_telemetry.py` — Read-only polyglot AST/regex scanner emitting JSON (`schemas/telemetry.schema.json`) or `--sarif` OASIS SARIF 2.1.0 (`templates/report.sarif`). Computes `tree_integrity_sha256`, skips vendored/cache dirs (`skipped_dirs_count`), measures true Python function AST CC & control-flow nesting depth, excludes Python docstrings from effective LOC, and counts JS/TS ternary/`&&`/`||` branches.
-- `scripts/dead_export_sweep.py` — Exports sweep (`export async function`, `export function*`, destructured & named exports) keeping test consumers visible under `--src` and emitting `--json` (`schemas/dead-export-sweep.schema.json`).
-- `scripts/canvas_geometry_probe.mjs` — Playwright `CanvasRenderingContext2D` hook using per-context `WeakMap`, `getTransform()`, `beginPath`/`closePath`/`rect`/`bezierCurveTo`/`quadraticCurveTo`, hue histograms, error capture, and `try/finally` browser cleanup (`schemas/canvas-probe.schema.json`).
+- `scripts/preflight_telemetry.py` — Read-only polyglot AST/regex scanner emitting JSON (`schemas/telemetry.schema.json`) or `--sarif` OASIS SARIF 2.1.0 (`templates/report.sarif`). Streaming 64 KiB `tree_integrity_sha256`, unified 20-dir pruning, true Python AST CC (no `with`/`else` inflation) & control-flow nesting, docstring-excluded LOC, JS/TS ternary/`&&`/`||` branches, regex-literal/`${...}`-template/SFC-`<script>`-aware masking, generic-function detection, context-gated hot-loop markers, and exact 1-based `silent_catch_lines`/`hot_loop_lines` SARIF spans.
+- `scripts/dead_export_sweep.py` — Barrel-aware exports sweep resolving relative `import`/`export ... from` graphs so unused `index.ts` re-exports and duplicate dead names cannot mask dead exports; buckets `dead_value_exports`, `test_only_exports`, `dead_type_exports`, and `dead_barrels` under `--src`/`--json` (`schemas/dead-export-sweep.schema.json`).
+- `scripts/canvas_probe_core.mjs` — Pure, browser-free stroke-gated Canvas/`Path2D` geometry hooks + hue histogram, unit-tested by `tests/canvas_probe_core.test.mjs` (`node --test`). Counters commit only on `stroke()`/`strokeRect()`/`stroke(Path2D)`, so `clip()`/`fill()` rects yield zero false artefacts.
+- `scripts/canvas_geometry_probe.mjs` — Playwright CLI reusing the core hook with `getTransform()`, error capture, and `try/finally` cleanup; adds `--click SELECTOR`, `--viewport WxH`, `--probe-ms N`, and `--wcag` (WCAG 2.5.8 target size, 2.4.11 focus occlusion, media queries) (`schemas/canvas-probe.schema.json`).
+- `scripts/score_audit.py` — Deterministic Pass-4 Health Score CLI (`--telemetry`/`--loc`, `--html-loc`, `--p0..--p3`, `--killed`/`--evaluated`, `--json`/`--markdown`) implementing the exact square-root formula; output validates against `schemas/audit-score.schema.json`.
 - `references/stack_failure_matrices.md` — Deep failure checklists for Games/WebGL (**A**), Next.js/React/Svelte/Convex (**B**), Python/C++/CLI/Agents (**C**), and Supply-Chain/Governance (**D**).
 - `references/test_mutation_rubric.md` — **7 Vibe-Coded Test Pathologies**, regression acceptance gate, Mental Mutation Testing ($M_{\text{kill}}$), and MVTH tiers.
 - `references/runtime-probe-harness.md` — Pristine-baseline A/B serving, canvas geometry/colour probes, WCAG 2.2 checks, and host-contention benchmarking (§8).
@@ -86,7 +88,7 @@ Mandatory for layout/overlap and rendered-artefact audits (`references/runtime-p
 
 - Serve app cleanly (`npx http-server -p 8000 -c-1 --cors -s &`); dismiss onboarding/input locks before sampling (`!document.body.classList.contains('<lock-class>')`).
 - Measure **two rects** per entity: the element box (`elementFromPoint` tap target) and visual text `Range.getBoundingClientRect()`. Hit-test 5 points (`centre` + `4` inset corners) per entity, compute `chrome ∩ entityWindow`, compare `config.symbolWidth/Height` vs `offsetWidth/Height` (`>1.5x` = P1), avoid `.querySelector()` hitting pooled/hidden nodes, check `opacity: 0` elements lacking `pointer-events: none`, and inspect `getComputedStyle` specificity overrides (ID selectors beating `body.viewport-* .class`).
-- Also probe WCAG `2.5.8` target size (`>=24px`), `2.4.11` focus visibility, `prefers-reduced-motion`/`prefers-contrast`/`forced-colors`, and composited pixel contrast.
+- Also probe WCAG `2.5.8` target size (`>=24px`), `2.4.11` focus visibility, `prefers-reduced-motion`/`prefers-contrast`/`forced-colors`, and composited pixel contrast. The probe CLI accepts `--click SELECTOR` (prerequisite setup), `--viewport WxH`, `--probe-ms N`, and `--wcag` to automate these checks.
 
 ### Pass 3: Existing Test Suite Comparison & Mental Mutation Analysis
 
@@ -99,7 +101,7 @@ Load `references/test_mutation_rubric.md` and construct the **Implementation vs.
 
 ### Pass 4: Quantitative Scoring & Surgical Refactoring Architecture
 
-Compute Health Score and Risk Level:
+Compute Health Score and Risk Level deterministically with `python3 -B <skill>/scripts/score_audit.py --telemetry /tmp/telemetry.json --p0 N --p1 N --p2 N --p3 N --killed K --evaluated E` (or `--loc N --html-loc H`); never do the floating-point math by hand. The formula:
 
 - $D_{\text{raw}} = (18 \times N_{\text{P0}}) + (8 \times N_{\text{P1}}) + (3 \times N_{\text{P2}}) + (1 \times N_{\text{P3}})$ and $P_{\text{test}} = 15 \times (1 - M_{\text{kill}} / 100)$.
 - $S_{\text{health}} = \max\left(0, \text{round}\left(100 - D_{\text{raw}} \times \sqrt{\frac{1000}{\max(500, \text{LOC}_{\text{effective}})}} - P_{\text{test}}\right)\right)$.

@@ -444,37 +444,86 @@ def test_conform_passes_matches_canonical_digest_and_rejects_drift(
 
 
 def test_zero_pii_across_repo() -> None:
-    """No real personal email addresses, private names, or phantom scripts exist."""
-    banned_fragments = (
-        "8straw" + "berrries",
-        "mrs." + "lock@gmail",
-        "Leandi" + "_DuPlessis",
-        "Lei" + "_DuPlessis",
-        "Prof." + " Pillay",
-        "Leslim" + " Kindergarten",
-        "Sang" + "som",
-        "verify_cv_consistency.py",
-    )
-    email_re = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+    """Enforce generic zero-PII/secret invariants across every tracked text file.
 
-    targets = [
-        SKILL_ROOT / "SKILL.md",
-        SKILL_ROOT / "README.md",
-        SKILL_ROOT / "AGENTS.md",
-        SKILL_ROOT / "LICENSE",
-        *(SKILL_ROOT / "references").glob("*.md"),
-        *(SKILL_ROOT / "templates").glob("*"),
-        *(SKILL_ROOT / "schemas").glob("*.json"),
-        *(SKILL_ROOT / "docs").rglob("*.md"),
-    ]
+    Only synthetic-placeholder rules are used (RFC 2606 email domains, generic
+    home-path placeholders, token-shaped secret prefixes), so this test embeds
+    no private identifiers and scans tests/ and scripts/ as well.
+    """
+    allowed_domains = {"example.com", "example.org", "example.net", "local"}
+    email_re = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+    home_re = re.compile(r"(?:/home/|/Users/|C:\\Users\\)([A-Za-z0-9_.-]+)")
+    home_placeholders = {
+        "user",
+        "username",
+        "name",
+        "example",
+        "test",
+        "runner",
+        "linuxbrew",
+        "<user>",
+        "<name>",
+        "<username>",
+    }
+    secret_res = (
+        re.compile(r"ghp_[A-Za-z0-9]{36}"),
+        re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
+        re.compile(r"sk-[A-Za-z0-9]{20,}"),
+        re.compile(r"AKIA[0-9A-Z]{16}"),
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    )
+    phantom_scripts = ("verify_cv_" + "consistency.py",)
+    skip_dirs = {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+    }
+    text_suffixes = {
+        ".md",
+        ".py",
+        ".mjs",
+        ".js",
+        ".ts",
+        ".json",
+        ".sarif",
+        ".sh",
+        ".toml",
+        ".yml",
+        ".yaml",
+        ".txt",
+    }
+    targets: list[Path] = []
+    for path in sorted(SKILL_ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        rel_parts = path.relative_to(SKILL_ROOT).parts
+        if any(part in skip_dirs for part in rel_parts):
+            continue
+        if path.suffix in text_suffixes or path.name == "LICENSE":
+            targets.append(path)
+    assert targets, "no tracked text files discovered for the PII scan"
     for path in targets:
-        text = path.read_text(encoding="utf-8")
-        for frag in banned_fragments:
-            assert frag not in text, f"Banned fragment {frag!r} found in {path}"
+        rel = path.relative_to(SKILL_ROOT)
+        text = path.read_text(encoding="utf-8", errors="replace")
         for domain in email_re.findall(text):
-            assert domain == "example.com", (
-                f"Non-example email domain {domain!r} in {path}"
+            assert domain in allowed_domains, (
+                f"non-placeholder email domain {domain!r} in {rel}"
             )
+        for segment in home_re.findall(text):
+            assert segment.lower() in home_placeholders, (
+                f"non-placeholder home directory segment {segment!r} in {rel}"
+            )
+        for secret_re in secret_res:
+            assert not secret_re.search(text), (
+                f"secret-shaped token matching {secret_re.pattern!r} in {rel}"
+            )
+        for phantom in phantom_scripts:
+            assert phantom not in text, f"phantom script {phantom!r} in {rel}"
 
 
 def test_sync_skill_check_sync_verify_in_isolated_home(tmp_path: Path) -> None:

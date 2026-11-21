@@ -8,3 +8,5 @@ __pycache__/
 .coverage
 node_modules/
 .DS_Store
+*-dump.txt
+*.bak
